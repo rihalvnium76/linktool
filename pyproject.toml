@@ -1,0 +1,61 @@
+[project]
+name = 'linktool'
+version = '0.1.0'
+description = 'Deduplicate a tree by removing duplicate files and links, then rebuild them as links or copies.'
+readme = 'README.md'
+requires-python = '>=3.14'
+dependencies = ['xxhash>=4.0.2']
+
+[project.scripts]
+linktool = 'linktool.cli:main'
+
+[build-system]
+requires = ['hatchling']
+build-backend = 'hatchling.build'
+
+[dependency-groups]
+dev = ['pytest>=8', 'pyright>=1.1', 'ruff>=0.14']
+
+[tool.hatch.build.targets.wheel]
+packages = ['src/linktool']
+
+[tool.uv]
+exclude-newer = '15 days'
+
+[tool.ruff]
+line-length = 100
+target-version = 'py314'
+src = ['src', 'tests']
+
+[tool.ruff.lint]
+select = ['ALL', 'ANN401']
+ignore = [
+    'A', 'ANN', 'ARG', 'COM812', 'CPY', 'D', 'EM', 'ERA', 'FAST', 'FBT', 'PLR', 'PTH', 'TD',
+    'BLE001', 'C901', 'N818', 'PLC0415', 'PLW1508', 'PLW2901', 'RET503', 'S101', 'SLF001',
+    'TC001', 'TC002', 'TC003', 'TC006', 'TRY003', 'TRY004',
+    # 面向用户的问题与日志是中文，全角标点和汉字是内容本身，不是误输入的易混字符。
+    'RUF001', 'RUF002', 'RUF003',
+]
+
+[tool.ruff.lint.per-file-ignores]
+'**/tests/*' = ['INP001']
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+'__future__.annotations'.msg = 'PEP 649 lazy annotations are the 3.14 default'
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = 'single'
+inline-quotes = 'single'
+multiline-quotes = 'single'
+
+[tool.ruff.lint.isort]
+lines-between-types = 1
+
+[tool.ruff.format]
+quote-style = 'preserve'
+
+[tool.pyright]
+include = ['src', 'tests']
+typeCheckingMode = 'strict'
+pythonVersion = '3.14'
+extraPaths = ['src']

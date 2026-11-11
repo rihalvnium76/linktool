@@ -1,0 +1,110 @@
+# linktool
+
+把一棵树里的重复文件和链接收拢成一个源加若干链接，再把它们按记录重建回来。
+主要用在 Windows 与 Android/Termux 之间搬运目录：先在本机把重复项移走，让复制工具只搬
+唯一的内容，到了目标机再按记录把链接补回来。
+
+## 命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `remove` | 每组重复内容只留一个源，其余路径删除 |
+| `stage` | 同上，但把其余路径移进暂存区 |
+| `rebuild` | 按状态文件把被移走的路径重建为硬链接、符号链接或副本 |
+| `restore` | 把暂存区里的条目移回原位 |
+| `fix` | 修复因源被移动而失效的符号链接 |
+| `init-config` | 写出带注释的配置模板 |
+
+`remove`、`stage`、`rebuild` 的执行形态是一致的：扫描或读状态，算出计划，无法自主决定
+的项写进 `<root>/.linktool/plan-<命令>.json` 并返回退出码 3，你填好 `answer` 后重跑同一
+条命令才真正执行。没有疑问项时一次跑完。
+
+## 跨机流程
+
+源机：
+
+```
+linktool stage --root D:/tree --staging H:/stage
+```
+
+剩下的内容里每个内容只剩一份，硬链接和符号链接都已移走，复制工具没有可展开的链接。
+复制工具必须把 `<root>/.linktool/` 一起搬走，目标机的 `rebuild` 全靠它。
+
+源机随后还原，与目标机互不影响：
+
+```
+linktool restore --staging H:/stage
+```
+
+目标机按记录重建：
+
+```
+linktool rebuild --root /storage/emulated/0/tree
+```
+
+同一台机器上去重只需要 `remove` 加 `rebuild`。
+
+## 状态与记录
+
+`<root>/.linktool/state.json` 记录每一组的源、每个被移走路径的原形态、mtime 和重建状态；
+`state.jsonl` 是逐条进度的追加日志，收尾时折回 `state.json`，崩溃后下次启动先折一次。
+两份文件都随树复制，因此目标机不需要源机在位。
+
+暂存区自己拥有 `<staging>/.linktool/staging.json`，记录被移动路径的原位置。
+暂存区必须位于受管树之外，否则复制工具会把它一起搬走。
+
+路径在 `state.json` 里记成相对受管树的形式并且用 `/` 分隔，同一份记录在 Windows 的
+`D:/tree` 和 Android 的 `/storage/emulated/0/tree` 上都能解析。受管树之外的路径记绝对
+路径，跨机后由你重新指定。
+
+## 判断重复
+
+先按大小分组，再对 1 MiB 以上的文件取首尾各 4 KiB 做快速哈希，最后全量
+`xxhash.xxh3_128`。最终身份是「大小 + 全量哈希」。符号链接按它解析出的文件参与内容
+分组，目录链接按解析出的目录分组。
+
+组里的源按两条规则定：组内符号链接解析出的 realpath 唯一时用那个 realpath；否则若偏好
+目录下恰好一个成员就用它。两条规则都成立却指向不同文件，或者都不成立时，整组进问题文件。
+命中偏好目录的组成员是链接时，链接新源指向它的 realpath。
+
+重建形态沿用原形态：原先是文件的按「硬链接 → 符号链接 → 副本」降级，原先是链接的仍然
+建成链接。硬链接要求源与目标同卷，符号链接与硬链接的支持情况由在目标目录里创建一次探针
+并按卷缓存来判断。要回退副本时，所有副本的预估总大小先进问题文件，你确认后才复制。
+
+## 平台差异
+
+Windows 上 `os.rename`、`os.replace`、`shutil.move` 作用在链接的目标上，链接本身的移动
+一律是「读指向，在新位置重建，再删旧的」。同一条道理让 `fix` 无法原子替换链接：新源先
+写进 `state.json`，再删旧链接、建新链接，中途失败的链接下次 `fix` 用记录补回。
+
+Windows 记录链接自身指向文件还是目录（`st_file_attributes` 的 `FILE_ATTRIBUTE_DIRECTORY`
+位），所以失效链接也能正确重建。POSIX 不记录也不需要，`os.symlink` 没有类型参数。
+
+`os.readlink` 在 Windows 上返回带 `\\?\` 前缀的绝对路径，读到的指向先去掉前缀再判断
+绝对与相对，否则 `isabs` 会把它判成相对路径。
+
+junction 按目录链接处理，重建时变成目录符号链接，转换时打一行警告。`os.path.islink` 认
+不出 junction，扫描时用 `os.path.isjunction` 一并识别，否则递归会钻进 junction 里。
+
+`os.utime(..., follow_symlinks=False)` 在 Windows 上抛 `NotImplementedError`，链接自身的
+mtime 只能保留在 POSIX 上，Windows 上输出警告。硬链接与源共享 inode，它的 mtime 就是源
+的 mtime，无法单独设置。
+
+## 配置
+
+`linktool init-config` 写出的模板覆盖全部设置：`root`、`staging`、`scan`、`prefer`、
+`base_dir`、`rel_mode`。命令行参数优先于配置文件，默认读工作目录下的 `linktool.toml`。
+
+`--root` 是状态文件的锚点，决定记录里相对路径的基准。`--base-dir` 只决定链接指向写成
+相对还是绝对，默认等于 `root`，可以设为 `root` 的上级，让两棵独立的树之间也能用相对
+路径。`--rel-mode` 取 `base`（只在 `base_dir` 内转相对）、`all`（全部尝试）或 `off`
+（保留绝对）。
+
+## 验证
+
+```
+uv run ruff format --check
+uv run ruff check
+uv run pyright
+uv run pytest
+```

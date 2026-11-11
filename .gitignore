@@ -1,3 +1,6 @@
 .secrets/
 AGENTS.local.md
 pi-session-*
+__pycache__/
+*.pyc
+.venv/
