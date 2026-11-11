@@ -2,6 +2,7 @@ import json
 import os
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -22,19 +23,42 @@ def _write(path: Path, content: bytes, mtime_ns: int = MTIME_NEW) -> None:
     os.utime(path, ns=(mtime_ns, mtime_ns))
 
 
-def _symlink(source: Path, target: Path, *, is_dir: bool = False) -> None:
+def _symlink(source: Path | str, target: Path, *, is_dir: bool = False) -> None:
     try:
         os.symlink(source, target, target_is_directory=is_dir)
     except OSError as error:
         pytest.skip(f'本机不能创建符号链接：{error}')
 
 
-def _answer(plan_path: Path, kind: str, value: str) -> None:
-    payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    for question in payload['questions']:
-        if question['kind'] == kind:
+def _plan(plan_path: Path) -> dict[str, object]:
+    return cast(dict[str, object], json.loads(plan_path.read_text(encoding='utf-8')))
+
+
+def _questions(plan_path: Path) -> list[dict[str, object]]:
+    raw = _plan(plan_path)['questions']
+    assert isinstance(raw, list)
+    return [cast(dict[str, object], item) for item in cast(list[object], raw)]
+
+
+def _answer(plan_path: Path, prefix: str, value: str) -> None:
+    payload = _plan(plan_path)
+    raw = payload['questions']
+    assert isinstance(raw, list)
+    for item in cast(list[object], raw):
+        question = cast(dict[str, object], item)
+        if str(question['id']).startswith(prefix):
             question['answer'] = value
     plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+
+
+def _accept(plan_path: Path) -> None:
+    _answer(plan_path, 'plan-', 'yes')
+
+
+def _decisions(plan_path: Path) -> list[dict[str, object]]:
+    raw = _plan(plan_path)['decisions']
+    assert isinstance(raw, list)
+    return [cast(dict[str, object], item) for item in cast(list[object], raw)]
 
 
 def _no_links(self: Prober, folder: Path) -> Capabilities:
@@ -46,7 +70,13 @@ def test_remove_then_rebuild_restores_a_hardlink(tmp_path: Path) -> None:
     _write(root / 'keep' / 'a.bin', b'payload')
     _write(root / 'other' / 'b.bin', b'payload')
 
-    assert call('remove', '--root', str(root), '--prefer', str(root / 'keep')) == 0
+    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    plan_path = root / '.linktool' / 'plan-remove.json'
+    assert all(str(question['id']).startswith('plan-') for question in _questions(plan_path))
+    _accept(plan_path)
+
+    assert call(*args) == 0
     assert not (root / 'other' / 'b.bin').exists()
     assert (root / 'keep' / 'a.bin').exists()
 
@@ -57,6 +87,22 @@ def test_remove_then_rebuild_restores_a_hardlink(tmp_path: Path) -> None:
     assert rebuilt.stat().st_ino == (root / 'keep' / 'a.bin').stat().st_ino
 
 
+def test_plan_file_records_every_decision(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    assert call('remove', '--root', str(root), '--prefer', str(root / 'keep')) == 3
+    decisions = _decisions(root / '.linktool' / 'plan-remove.json')
+    assert decisions == [
+        {
+            'source': 'keep/a.bin',
+            'reason': '偏好目录下唯一',
+            'identity': decisions[0]['identity'],
+            'paths': ['other/b.bin'],
+        }
+    ]
+
+
 def test_ambiguous_group_waits_for_an_answer(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'a.bin', b'payload')
@@ -64,13 +110,44 @@ def test_ambiguous_group_waits_for_an_answer(tmp_path: Path) -> None:
 
     assert call('remove', '--root', str(root)) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert plan_path.exists()
+    assert all(str(question['id']).startswith('source-') for question in _questions(plan_path))
     assert sorted(path.name for path in root.glob('*.bin')) == ['a.bin', 'b.bin']
 
-    _answer(plan_path, 'choice', '1')
+    _answer(plan_path, 'source-', '1')
+    assert call('remove', '--root', str(root)) == 3
+    _accept(plan_path)
     assert call('remove', '--root', str(root)) == 0
     assert [path.name for path in root.glob('*.bin')] == ['a.bin']
     assert not plan_path.exists()
+
+
+def test_pick_first_proposes_a_source_for_one_confirmation(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'a.bin', b'payload')
+    _write(root / 'b.bin', b'payload')
+    args = ('remove', '--root', str(root), '--pick', 'first')
+
+    assert call(*args) == 3
+    plan_path = root / '.linktool' / 'plan-remove.json'
+    assert all(str(question['id']).startswith('plan-') for question in _questions(plan_path))
+    assert _decisions(plan_path)[0]['reason'] == '无规则可依，按路径排序取最前'
+    assert _decisions(plan_path)[0]['source'] == 'a.bin'
+
+    _accept(plan_path)
+    assert call(*args) == 0
+    assert [path.name for path in root.glob('*.bin')] == ['a.bin']
+
+
+def test_declining_the_plan_leaves_the_tree_alone(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    plan_path = root / '.linktool' / 'plan-remove.json'
+    _answer(plan_path, 'plan-', 'no')
+    assert call(*args) == 1
+    assert (root / 'other' / 'b.bin').exists()
 
 
 def test_plan_for_other_arguments_is_refused(tmp_path: Path) -> None:
@@ -87,10 +164,9 @@ def test_invalid_answer_keeps_the_question(tmp_path: Path) -> None:
     _write(root / 'b.bin', b'payload')
     assert call('remove', '--root', str(root)) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    _answer(plan_path, 'choice', '99')
+    _answer(plan_path, 'source-', '99')
     assert call('remove', '--root', str(root)) == 3
-    payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    assert payload['questions'][0]['error'] is not None
+    assert _questions(plan_path)[0]['error'] is not None
     assert [path.name for path in root.glob('*.bin')] == ['a.bin', 'b.bin']
 
 
@@ -101,6 +177,8 @@ def test_stage_then_restore(tmp_path: Path) -> None:
     _write(root / 'other' / 'b.bin', b'payload')
 
     args = ('--root', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
+    assert call('stage', *args) == 3
+    _accept(root / '.linktool' / 'plan-stage.json')
     assert call('stage', *args) == 0
     assert not (root / 'other' / 'b.bin').exists()
     assert (staging / 'files' / 'other' / 'b.bin').exists()
@@ -121,7 +199,10 @@ def test_rebuild_keeps_a_link_a_link(tmp_path: Path) -> None:
     _write(root / 'a.bin', b'payload')
     _symlink(root / 'a.bin', root / 'link.lnk')
 
-    assert call('remove', '--root', str(root)) == 0
+    args = ('remove', '--root', str(root))
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-remove.json')
+    assert call(*args) == 0
     assert not (root / 'link.lnk').exists()
 
     assert call('rebuild', '--root', str(root)) == 0
@@ -138,10 +219,15 @@ def test_copy_fallback_confirms_size_and_keeps_mtime(
     _write(root / 'keep' / 'a.bin', b'payload' * 100, MTIME_NEW)
     _write(root / 'other' / 'b.bin', b'payload' * 100, MTIME_OLD)
 
-    assert call('remove', '--root', str(root), '--prefer', str(root / 'keep')) == 0
+    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-remove.json')
+    assert call(*args) == 0
+
     plan_path = root / '.linktool' / 'plan-rebuild.json'
     assert call('rebuild', '--root', str(root)) == 3
-    _answer(plan_path, 'confirm', 'yes')
+    assert all(str(question['id']).startswith('copy-') for question in _questions(plan_path))
+    _answer(plan_path, 'copy-', 'yes')
     assert call('rebuild', '--root', str(root)) == 0
 
     rebuilt = root / 'other' / 'b.bin'
@@ -155,13 +241,15 @@ def test_relative_links_respect_base_dir(tmp_path: Path) -> None:
     _write(root / 'deep' / 'a.bin', b'payload')
     _symlink(root / 'deep' / 'a.bin', root / 'deep' / 'link.lnk')
 
-    assert call('remove', '--root', str(root)) == 0
-    assert call('rebuild', '--root', str(root), '--rel-mode', 'off') == 0
-    assert os.readlink(root / 'deep' / 'link.lnk').endswith('a.bin')
-
-    assert call('remove', '--root', str(root)) == 0
-    assert call('rebuild', '--root', str(root)) == 0
-    assert os.readlink(root / 'deep' / 'link.lnk') == 'a.bin'
+    for mode, expected in (('off', None), ('base', 'a.bin')):
+        args = ('remove', '--root', str(root))
+        if not (root / '.linktool' / 'plan-remove.json').exists():
+            assert call(*args) == 3
+        _accept(root / '.linktool' / 'plan-remove.json')
+        assert call(*args) == 0
+        assert call('rebuild', '--root', str(root), '--rel-mode', mode) == 0
+        text = os.readlink(root / 'deep' / 'link.lnk')
+        assert text == expected if expected is not None else text.endswith('a.bin')
 
 
 def test_scan_outside_root_asks_first(tmp_path: Path) -> None:
@@ -173,20 +261,11 @@ def test_scan_outside_root_asks_first(tmp_path: Path) -> None:
     args = ('remove', '--root', str(root), '--scan', str(root), '--scan', str(outside))
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    assert [question['kind'] for question in payload['questions']] == ['confirm']
+    assert [question['kind'] for question in _questions(plan_path)] == ['confirm']
 
-    _answer(plan_path, 'confirm', 'yes')
+    _answer(plan_path, 'scan-', 'yes')
     assert call(*args) == 3
-    payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    assert payload['questions'][0]['kind'] == 'choice'
-
-
-def test_init_config_refuses_to_overwrite(tmp_path: Path) -> None:
-    target = tmp_path / 'linktool.toml'
-    assert call('init-config', '--path', str(target)) == 0
-    assert 'root' in target.read_text(encoding='utf-8')
-    assert call('init-config', '--path', str(target)) == 1
+    assert _questions(plan_path)[0]['kind'] == 'choice'
 
 
 def test_missing_os_link_falls_back_to_a_symlink(
@@ -203,6 +282,16 @@ def test_missing_os_link_falls_back_to_a_symlink(
     root = tmp_path / 'tree'
     _write(root / 'keep' / 'a.bin', b'payload')
     _write(root / 'other' / 'b.bin', b'payload')
-    assert call('remove', '--root', str(root), '--prefer', str(root / 'keep')) == 0
+    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-remove.json')
+    assert call(*args) == 0
     assert call('rebuild', '--root', str(root)) == 0
     assert (root / 'other' / 'b.bin').is_symlink()
+
+
+def test_init_config_refuses_to_overwrite(tmp_path: Path) -> None:
+    target = tmp_path / 'linktool.toml'
+    assert call('init-config', '--path', str(target)) == 0
+    assert 'pick' in target.read_text(encoding='utf-8')
+    assert call('init-config', '--path', str(target)) == 1

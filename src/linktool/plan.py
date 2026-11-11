@@ -8,9 +8,11 @@ from linktool import jsonio
 from linktool.errors import ToolError
 
 INTRO = (
-    '本文件由 linktool 生成，列出它无法自行决定的问题。\n'
+    '本文件由 linktool 生成。decisions 段是这一轮由规则定下的全部决定，'
+    'questions 段是工具无法自行决定、或需要你放行的项。\n'
     '在每一题的 answer 字段填入答案，然后重新运行同一条命令；'
     '命令行参数必须与生成本文件时一致。\n'
+    'answers 段记着已经答过、本轮还在沿用的答案。\n'
     'confirm 题填 yes 或 no；choice 题填候选序号、候选值或 skip；'
     'fill 题填候选序号、路径或 skip。\n'
     '工具不会猜你的意思：填了无效答案会在这里标出原因，等你重填。'
@@ -57,10 +59,16 @@ class Interrogator:
     def __init__(self, previous: Mapping[str, str]) -> None:
         self._previous = previous
         self._questions: list[Question] = []
+        self._settled: dict[str, str] = {}
 
     @property
     def questions(self) -> tuple[Question, ...]:
         return tuple(self._questions)
+
+    @property
+    def settled(self) -> dict[str, str]:
+        '''Answers this run reused, so the next run still sees them in the file.'''
+        return dict(self._settled)
 
     def confirm(self, qid: str, prompt: str) -> bool | None:
         answer = self._ask(qid, 'confirm', prompt, (), _confirm)
@@ -87,6 +95,7 @@ class Interrogator:
         if raw is not None and raw.strip():
             valid = validate(raw)
             if valid is not None:
+                self._settled[qid] = valid
                 return valid
             error = '答案无效，请按 prompt 的说明重填'
         self._questions.append(
@@ -102,9 +111,10 @@ class Interrogator:
         return None
 
 
-def short_id(*parts: str) -> str:
+def short_id(kind: str, *parts: str) -> str:
+    '''A stable question id whose prefix names what the question is about.'''
     seed = '\0'.join(parts).encode()
-    return hashlib.blake2s(seed, digest_size=4).hexdigest()
+    return f'{kind}-{hashlib.blake2s(seed, digest_size=4).hexdigest()}'
 
 
 def answers(path: Path, command: str, args: Mapping[str, str]) -> dict[str, str]:
@@ -121,7 +131,11 @@ def answers(path: Path, command: str, args: Mapping[str, str]) -> dict[str, str]
             f'{path} 属于「{stored_command}」命令或另一组参数。\n'
             '改回原来的参数，或删除该文件后重新运行。'
         )
-    found: dict[str, str] = {}
+    found: dict[str, str] = {
+        key: value
+        for key, value in jsonio.mapping(payload.get('answers', {}), 'answers').items()
+        if isinstance(value, str) and value.strip()
+    }
     for item in jsonio.sequence(payload.get('questions'), 'questions'):
         question = jsonio.mapping(item, 'question')
         answer = jsonio.maybe_text(question, 'answer')
@@ -131,7 +145,14 @@ def answers(path: Path, command: str, args: Mapping[str, str]) -> dict[str, str]
     return found
 
 
-def save(path: Path, command: str, args: Mapping[str, str], questions: Sequence[Question]) -> None:
+def save(
+    path: Path,
+    command: str,
+    args: Mapping[str, str],
+    questions: Sequence[Question],
+    decisions: Sequence[Mapping[str, object]],
+    settled: Mapping[str, str],
+) -> None:
     jsonio.write(
         path,
         {
@@ -139,6 +160,8 @@ def save(path: Path, command: str, args: Mapping[str, str], questions: Sequence[
             'command': command,
             'args': dict(args),
             'intro': INTRO,
+            'decisions': list(decisions),
+            'answers': dict(settled),
             'questions': [question.to_json() for question in questions],
         },
     )

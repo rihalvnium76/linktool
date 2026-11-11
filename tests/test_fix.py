@@ -46,7 +46,13 @@ def test_fix_follows_the_content_recorded_in_state(
     _write(root / 'keep' / 'a.bin', b'payload')
     _write(root / 'other' / 'b.bin', b'payload')
 
-    assert call('remove', '--root', str(root), '--prefer', str(root / 'keep')) == 0
+    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    plan_path = root / '.linktool' / 'plan-remove.json'
+    payload = json.loads(plan_path.read_text(encoding='utf-8'))
+    payload['questions'][0]['answer'] = 'yes'
+    plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    assert call(*args) == 0
     assert call('rebuild', '--root', str(root)) == 0
     link = root / 'other' / 'b.bin'
     assert link.is_symlink()

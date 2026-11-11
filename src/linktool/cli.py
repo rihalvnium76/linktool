@@ -29,6 +29,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         prefer=args.prefer,
         base_dir=args.base_dir,
         rel_mode=args.rel_mode,
+        pick=getattr(args, 'pick', None),
     )
     match command:
         case 'remove':
@@ -67,6 +68,11 @@ def _parser() -> argparse.ArgumentParser:
         '--rel-mode',
         choices=['base', 'all', 'off'],
         help='链接指向的写法：base 只把 base_dir 内的转相对，all 全部尝试，off 保留绝对',
+    )
+    common.add_argument(
+        '--pick',
+        choices=['ask', 'first'],
+        help='没有规则能定源时：ask 逐组提问，first 按路径排序取最前',
     )
 
     staging_option = argparse.ArgumentParser(add_help=False)

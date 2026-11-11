@@ -6,10 +6,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from linktool import hashing, log
+from linktool.config import Pick
 from linktool.fs import Kind
 from linktool.hashing import SAMPLE_MIN, Identity
 from linktool.paths import is_within, plain
 from linktool.scan import Entry
+
+
+@dataclass(frozen=True, slots=True)
+class Source:
+    '''The path a group's links should point at, and the rule that named it.'''
+
+    path: Path
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,15 +141,16 @@ def _distinct(members: Sequence[Participant]) -> int:
     return len({plain(member.entry.path) for member in members})
 
 
-def auto_source(group: Group, prefer: Sequence[Path]) -> Path | None:
-    '''The source the rules settle without asking, or None when the rules disagree.
+def auto_source(group: Group, prefer: Sequence[Path], pick: Pick) -> Source | None:
+    '''The source the rules settle without asking, or None when they leave it open.
 
     A group of directory links has one target by construction. For files, a single
     realpath among the link members wins, then a single object under a preferred
-    directory. When both exist and disagree, the user decides.
+    directory. Two rules that disagree, or no rule at all, leave the choice to the user
+    unless `pick` names a fallback; either way the tool never decides silently.
     '''
     if group.dir_target is not None:
-        return group.dir_target
+        return Source(group.dir_target, 'link')
     link_reals = {
         plain(member.real): member.real
         for member in group.members
@@ -155,9 +165,16 @@ def auto_source(group: Group, prefer: Sequence[Path]) -> Path | None:
     preferred = _single_object(under)
     if from_links is not None and preferred is not None:
         if plain(from_links) == plain(preferred) or _same_object(from_links, preferred):
-            return from_links
+            return Source(from_links, 'link')
         return None
-    return from_links if from_links is not None else preferred
+    if from_links is not None:
+        return Source(from_links, 'link')
+    if preferred is not None:
+        return Source(preferred, 'prefer')
+    if pick is Pick.FIRST:
+        first = min(group.members, key=lambda member: member.entry.label)
+        return Source(first.real, 'fallback')
+    return None
 
 
 def _single_object(members: Sequence[Participant]) -> Path | None:

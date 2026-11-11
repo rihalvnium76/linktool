@@ -5,10 +5,16 @@ from pathlib import Path
 import pytest
 
 from linktool import hashing, identify, scan
+from linktool.config import Pick
 
 
 def _entries(root: Path) -> list[scan.Entry]:
     return scan.collect([root], root, []).entries
+
+
+def _source(group: identify.Group, prefer: tuple[Path, ...], pick: Pick = Pick.ASK) -> Path | None:
+    found = identify.auto_source(group, prefer, pick)
+    return found.path if found is not None else None
 
 
 def _symlink(source: Path | str, target: Path, *, is_dir: bool = False) -> None:
@@ -75,14 +81,14 @@ def test_auto_source_uses_single_realpath_among_links(tmp_path: Path) -> None:
     _symlink(tmp_path / 'a.bin', tmp_path / 'x.bin')
     _symlink(tmp_path / 'a.bin', tmp_path / 'y.bin')
     group = identify.build(_entries(tmp_path))[0]
-    assert identify.auto_source(group, ()) == tmp_path / 'a.bin'
+    assert _source(group, ()) == tmp_path / 'a.bin'
 
 
 def test_auto_source_uses_preferred_directory(tmp_path: Path) -> None:
     _write(tmp_path / 'keep' / 'a.bin', b'payload', 1)
     _write(tmp_path / 'other' / 'b.bin', b'payload', 2)
     group = identify.build(_entries(tmp_path))[0]
-    assert identify.auto_source(group, (tmp_path / 'keep',)) == tmp_path / 'keep' / 'a.bin'
+    assert _source(group, (tmp_path / 'keep',)) == tmp_path / 'keep' / 'a.bin'
 
 
 def test_auto_source_reports_conflict(tmp_path: Path) -> None:
@@ -90,14 +96,14 @@ def test_auto_source_reports_conflict(tmp_path: Path) -> None:
     _write(tmp_path / 'other' / 'b.bin', b'payload', 2)
     _symlink(tmp_path / 'other' / 'b.bin', tmp_path / 'other' / 'c.bin')
     group = identify.build(_entries(tmp_path))[0]
-    assert identify.auto_source(group, (tmp_path / 'keep',)) is None
+    assert _source(group, (tmp_path / 'keep',)) is None
 
 
 def test_auto_source_without_rule_is_undecided(tmp_path: Path) -> None:
     _write(tmp_path / 'a.bin', b'payload', 1)
     _write(tmp_path / 'b.bin', b'payload', 2)
     group = identify.build(_entries(tmp_path))[0]
-    assert identify.auto_source(group, ()) is None
+    assert _source(group, ()) is None
 
 
 def test_quick_digest_separates_same_size(tmp_path: Path) -> None:
@@ -111,4 +117,20 @@ def test_auto_source_counts_hardlinks_in_preferred_directory_as_one(tmp_path: Pa
     os.link(tmp_path / 'keep' / 'a.bin', tmp_path / 'keep' / 'b.bin')
     _write(tmp_path / 'other' / 'c.bin', b'payload', 2)
     group = identify.build(_entries(tmp_path))[0]
-    assert identify.auto_source(group, (tmp_path / 'keep',)) == tmp_path / 'keep' / 'a.bin'
+    assert _source(group, (tmp_path / 'keep',)) == tmp_path / 'keep' / 'a.bin'
+
+
+def test_auto_source_falls_back_to_the_first_label(tmp_path: Path) -> None:
+    _write(tmp_path / 'a.bin', b'payload', 1)
+    _write(tmp_path / 'b.bin', b'payload', 2)
+    group = identify.build(_entries(tmp_path))[0]
+    assert _source(group, (), Pick.FIRST) == tmp_path / 'a.bin'
+    assert _source(group, (), Pick.ASK) is None
+
+
+def test_fallback_leaves_a_rule_conflict_to_the_user(tmp_path: Path) -> None:
+    _write(tmp_path / 'keep' / 'a.bin', b'payload', 1)
+    _write(tmp_path / 'other' / 'b.bin', b'payload', 2)
+    _symlink(tmp_path / 'other' / 'b.bin', tmp_path / 'other' / 'c.bin')
+    group = identify.build(_entries(tmp_path))[0]
+    assert _source(group, (tmp_path / 'keep',), Pick.FIRST) is None

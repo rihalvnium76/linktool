@@ -2,6 +2,7 @@ import tomllib
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 
 from linktool import jsonio
@@ -15,6 +16,13 @@ class ConfigError(ToolError):
     '''A required setting is missing or unusable.'''
 
 
+class Pick(StrEnum):
+    '''What to do when no rule settles a group's source.'''
+
+    ASK = 'ask'
+    FIRST = 'first'
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     root: Path | None = None
@@ -23,6 +31,7 @@ class Config:
     prefer: tuple[Path, ...] = ()
     base_dir: Path | None = None
     rel_mode: RelMode = RelMode.BASE
+    pick: Pick = Pick.ASK
 
     def required_root(self) -> Path:
         if self.root is None:
@@ -54,6 +63,7 @@ def load_file(path: Path) -> Config:
         prefer=_paths(source, 'prefer'),
         base_dir=_maybe_path(source, 'base_dir'),
         rel_mode=_rel_mode(source),
+        pick=_pick(source),
     )
 
 
@@ -66,6 +76,7 @@ def build(
     prefer: Sequence[str],
     base_dir: str | None,
     rel_mode: str | None,
+    pick: str | None,
 ) -> Config:
     if config_path is None:
         guess = Path(DEFAULT_FILE)
@@ -86,6 +97,8 @@ def build(
         chosen = replace(chosen, base_dir=Path(base_dir))
     if rel_mode is not None:
         chosen = replace(chosen, rel_mode=RelMode(rel_mode))
+    if pick is not None:
+        chosen = replace(chosen, pick=Pick(pick))
 
     return Config(
         root=_absolute(chosen.root),
@@ -94,6 +107,7 @@ def build(
         prefer=tuple(item.absolute() for item in chosen.prefer),
         base_dir=_absolute(chosen.base_dir),
         rel_mode=chosen.rel_mode,
+        pick=chosen.pick,
     )
 
 
@@ -111,6 +125,16 @@ def _paths(source: dict[str, object], key: str) -> tuple[Path, ...]:
     if value is None:
         return ()
     return tuple(Path(str(item)) for item in jsonio.sequence(value, key))
+
+
+def _pick(source: dict[str, object]) -> Pick:
+    value = jsonio.maybe_text(source, 'pick')
+    if value is None:
+        return Pick.ASK
+    try:
+        return Pick(value)
+    except ValueError as error:
+        raise ConfigError('配置项 pick 只能是 ask 或 first') from error
 
 
 def _rel_mode(source: dict[str, object]) -> RelMode:
@@ -144,4 +168,7 @@ TEMPLATE = '''\
 
 # 链接指向的写法：base 只在 base_dir 内转相对路径，all 全部尝试，off 保留绝对路径。
 # rel_mode = 'base'
+
+# 没有规则能定源时：ask 逐组提问，first 按路径排序取最前。两种都写进计划等你确认。
+# pick = 'ask'
 '''

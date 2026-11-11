@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from linktool import EXIT_OK, identify, log, plan, scan, state
+from linktool import EXIT_OK, errors, identify, log, plan, scan, state
 from linktool.commands import shared
 from linktool.config import Config, ConfigError
 from linktool.fs import Kind, move_file, move_link, remove_path
@@ -44,16 +44,26 @@ def run(config: Config, *, stage: bool) -> int:
     groups = identify.build(scan.collect(scans, root, exclude).entries)
     groups.sort(key=lambda group: group.key)
 
+    decisions: list[dict[str, object]] = []
     records = [
-        record for group in groups if (record := _decide(group, root, config, ask)) is not None
+        record
+        for group in groups
+        if (record := _decide(group, root, config, ask, decisions)) is not None
     ]
-
     if ask.questions:
-        return shared.await_answers(plan_path, command, args, ask)
+        return shared.await_answers(plan_path, command, args, ask, decisions)
     if not records:
         log.note('没有找到可处理的重复文件或链接')
         plan.discard(plan_path)
         return EXIT_OK
+    released = _ask_for_the_plan(ask, records, decisions)
+    if released is None:
+        return shared.await_answers(plan_path, command, args, ask, decisions)
+    if not released:
+        raise errors.ToolError(
+            f'你否决了这份计划，磁盘上没有任何改动。'
+            f'把 {plan_path} 里 plan- 开头的题改成 yes 可重新放行。'
+        )
 
     _apply(records, root, folder, staging)
     plan.discard(plan_path)
@@ -63,11 +73,17 @@ def run(config: Config, *, stage: bool) -> int:
 
 
 def _decide(
-    group: identify.Group, root: Path, config: Config, ask: plan.Interrogator
+    group: identify.Group,
+    root: Path,
+    config: Config,
+    ask: plan.Interrogator,
+    decisions: list[dict[str, object]],
 ) -> state.GroupRecord | None:
-    source = identify.auto_source(group, config.prefer)
+    source = identify.auto_source(group, config.prefer, config.pick)
+    reason = source.reason if source is not None else ''
+    decided = source.path if source is not None else None
     answered = False
-    if source is None:
+    if decided is None:
         choice = ask.choose(
             plan.short_id('source', identify.signature(group)),
             f'这一组 {_describe(group)} 的源无法自动确定：符号链接的 realpath 不唯一，'
@@ -76,22 +92,62 @@ def _decide(
         )
         if choice is None or choice == 'skip':
             return None
-        source = identify.resolve(group, Path(choice))
+        decided = identify.resolve(group, Path(choice))
+        reason = 'yours'
         answered = True
 
-    if not is_within(source, root) and not answered:
+    if not is_within(decided, root) and not answered:
         gate = ask.confirm(
             plan.short_id('outside', identify.signature(group)),
-            f'这一组的源在受管树之外：{source}\n'
+            f'这一组的源在受管树之外：{decided}\n'
             '目标机上这个路径可能不存在，重建出的链接会在那里失效。确认以它作为源吗？（yes/no）',
         )
         if gate is None or not gate:
             return None
 
-    members = [member for member in group.members if plain(member.entry.path) != plain(source)]
+    members = [member for member in group.members if plain(member.entry.path) != plain(decided)]
     if not members:
         return None
-    return _record(root, group, source, members)
+    record = _record(root, group, decided, members)
+    decisions.append(
+        {
+            'source': record.source_rel or record.source_abs,
+            'reason': _REASONS[reason],
+            'identity': _identity_note(group),
+            'paths': [member.label for member in record.members],
+        }
+    )
+    return record
+
+
+_REASONS = {
+    'link': '符号链接的 realpath 唯一',
+    'prefer': '偏好目录下唯一',
+    'fallback': '无规则可依，按路径排序取最前',
+    'yours': '你在本文件中指定',
+}
+
+
+def _identity_note(group: identify.Group) -> str:
+    if group.identity is None:
+        return '目录链接'
+    return f'{group.identity.size} 字节 {group.identity.digest[:12]}'
+
+
+def _ask_for_the_plan(
+    ask: plan.Interrogator, records: list[state.GroupRecord], decisions: list[dict[str, object]]
+) -> bool | None:
+    '''One gate for the whole plan: the rules proposed every source, the user releases them.'''
+    fallback = sum(1 for item in decisions if item['reason'] == _REASONS['fallback'])
+    total = sum(len(record.members) for record in records)
+    extra = f'，其中 {fallback} 组由排序兜底选定' if fallback else ''
+    seed = (f'{record.key}|{record.source_rel or record.source_abs}' for record in records)
+    return ask.confirm(
+        plan.short_id('plan', *seed),
+        f'本文件的 decisions 段列出这一轮的全部决定：{len(records)} 组，'
+        f'{total} 条路径会被移除或暂存{extra}。\n'
+        '确认之前磁盘上不会有任何改动。确认执行吗？（yes/no）',
+    )
 
 
 def _describe(group: identify.Group) -> str:
