@@ -158,6 +158,15 @@ def test_plan_for_other_arguments_is_refused(tmp_path: Path) -> None:
     assert call('remove', '--root', str(root), '--prefer', str(root)) == 1
 
 
+def test_plan_for_another_pick_is_refused(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'a.bin', b'payload')
+    _write(root / 'b.bin', b'payload')
+    assert call('remove', '--root', str(root)) == 3
+    assert call('remove', '--root', str(root), '--pick', 'first') == 1
+    assert (root / 'b.bin').exists()
+
+
 def test_invalid_answer_keeps_the_question(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'a.bin', b'payload')

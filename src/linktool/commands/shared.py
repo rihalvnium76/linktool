@@ -7,7 +7,7 @@ from linktool.paths import from_rel
 
 
 def snapshot(config: Config) -> dict[str, str]:
-    '''The settings that decide a plan, so a stale plan cannot apply to other settings.'''
+    '''Every setting that decides a plan, so a stale plan cannot apply to other settings.'''
     return {
         'root': str(config.root or ''),
         'staging': str(config.staging or ''),
@@ -15,6 +15,7 @@ def snapshot(config: Config) -> dict[str, str]:
         'prefer': ';'.join(str(path) for path in config.prefer),
         'base_dir': str(config.base_dir or ''),
         'rel_mode': str(config.rel_mode),
+        'pick': str(config.pick),
     }
 
 
