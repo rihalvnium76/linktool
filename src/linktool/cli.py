@@ -71,12 +71,22 @@ def _parser() -> argparse.ArgumentParser:
 
     scanning = argparse.ArgumentParser(add_help=False)
     scanning.add_argument(
-        '--scan', action='append', default=[], metavar='PATH', help='扫描路径，可重复'
+        '--scan',
+        action='extend',
+        nargs='+',
+        default=[],
+        metavar='PATH',
+        help='扫描路径，可给多个或重复给出',
     )
 
     sources = argparse.ArgumentParser(add_help=False)
     sources.add_argument(
-        '--prefer', action='append', default=[], metavar='DIR', help='源偏好目录，可重复'
+        '--prefer',
+        action='extend',
+        nargs='+',
+        default=[],
+        metavar='DIR',
+        help='源偏好目录，可给多个或重复给出',
     )
     sources.add_argument(
         '--pick',
