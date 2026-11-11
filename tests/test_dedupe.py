@@ -297,10 +297,3 @@ def test_missing_os_link_falls_back_to_a_symlink(
     assert call(*args) == 0
     assert call('rebuild', '--root', str(root)) == 0
     assert (root / 'other' / 'b.bin').is_symlink()
-
-
-def test_init_config_refuses_to_overwrite(tmp_path: Path) -> None:
-    target = tmp_path / 'linktool.toml'
-    assert call('init-config', '--path', str(target)) == 0
-    assert 'pick' in target.read_text(encoding='utf-8')
-    assert call('init-config', '--path', str(target)) == 1

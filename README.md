@@ -28,7 +28,6 @@ PYTHONPATH=src python -m linktool --help
 | `rebuild` | 按状态文件把被移走的路径重建为硬链接、符号链接或副本 |
 | `restore` | 把暂存区里的条目移回原位 |
 | `fix` | 修复因源被移动而失效的符号链接 |
-| `init-config` | 写出带注释的配置模板 |
 
 `remove`、`stage`、`rebuild` 的执行形态是一致的：扫描或读状态，算出计划，无法自主决定的项写进 `<root>/.linktool/plan-<命令>.json` 并返回退出码 3，用户填好 `answer` 后重跑同一条命令才真正执行。计划文件的 `args` 段记着生成它的全部设置，重跑时逐项比对，命令或任何一项设置不同就拒绝；想沿用已填的答案，把 `args` 段改成这次的参数再重跑。
 
@@ -88,11 +87,13 @@ junction 按目录链接处理，重建时变成目录符号链接，转换时�
 
 `os.utime(..., follow_symlinks=False)` 在 Windows 上抛 `NotImplementedError`，链接自身的 mtime 只能保留在 POSIX 上，Windows 上输出警告。硬链接与源共享 inode，它的 mtime 就是源的 mtime，无法单独设置。
 
-## 配置
+## 参数
 
-`linktool init-config` 写出的模板覆盖全部设置：`root`、`staging`、`scan`、`prefer`、`base_dir`、`rel_mode`、`pick`。命令行参数优先于配置文件，默认读工作目录下的 `linktool.toml`。`--scan` 和 `--prefer` 可以重复，一旦给出就整份替换配置文件里的同名列表。
+`--root` 是状态文件的锚点，决定记录里相对路径的基准。`--scan` 可以重复，默认就是 `root`；`--prefer` 也可以重复，列出源偏好目录。`--pick` 取 `ask`（逐组提问）或 `first`（按路径排序取最前），默认 `ask`。
 
-`--root` 是状态文件的锚点，决定记录里相对路径的基准。`--base-dir` 只决定链接指向写成相对还是绝对，默认等于 `root`，可以设为 `root` 的上级，让两棵独立的树之间也能用相对路径。`--rel-mode` 取 `base`（只在 `base_dir` 内转相对）、`all`（全部尝试）或 `off`（保留绝对）。
+`--base-dir` 只决定链接指向写成相对还是绝对，默认等于 `root`，可以设为 `root` 的上级，让两棵独立的树之间也能用相对路径。`--rel-mode` 取 `base`（只在 `base_dir` 内转相对）、`all`（全部尝试）或 `off`（保留绝对）。
+
+每条命令只接受自己读得到的参数：`stage` 与 `restore` 需要 `--staging`，`rebuild` 与 `fix` 接受 `--base-dir` 与 `--rel-mode`，`fix` 只扫链接不选源，所以没有 `--prefer` 与 `--pick`。重跑时要给出的设置保持一致，写进脚本比每次重新敲一遍省事。
 
 ## 验证
 
