@@ -69,6 +69,14 @@ def remove_path(path: Path) -> None:
     os.unlink(path)
 
 
+def existing_ancestor(path: Path) -> Path:
+    '''The nearest directory at or above path that exists, whose volume a probe can read.'''
+    current = path
+    while not current.exists() and current != current.parent:
+        current = current.parent
+    return current
+
+
 def move_link(source: Path, path: Path) -> None:
     '''Recreate a link at path, then drop the original.
 

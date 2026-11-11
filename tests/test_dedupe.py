@@ -251,6 +251,93 @@ def test_links_whose_volume_refuses_symlinks_ask_before_skipping(
     assert not (root / 'link-b').exists()
 
 
+def test_stage_skips_links_the_staging_volume_cannot_hold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'docs' / 'inner.bin', b'payload')
+    _symlink('docs', root / 'link-a', is_dir=True)
+    _symlink('docs', root / 'link-b', is_dir=True)
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    staging = tmp_path / 'stage'
+
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    args = (
+        'stage',
+        '--root',
+        str(root),
+        '--staging',
+        str(staging),
+        '--prefer',
+        str(root / 'keep'),
+    )
+    plan_path = root / '.linktool' / 'plan-stage.json'
+    assert call(*args) == 3
+    assert [str(question['id']).split('-')[0] for question in _questions(plan_path)] == [
+        'unavailable'
+    ]
+
+    _answer(plan_path, 'unavailable-', 'yes')
+    assert call(*args) == 3
+    _accept(plan_path)
+    assert call(*args) == 0
+
+    assert os.path.lexists(root / 'link-a')
+    assert os.path.lexists(root / 'link-b')
+    assert not (root / 'other' / 'b.bin').exists()
+
+
+def test_restore_keeps_a_link_staged_where_links_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'a.bin', b'payload')
+    _symlink('a.bin', root / 'link.lnk')
+    staging = tmp_path / 'stage'
+
+    args = ('stage', '--root', str(root), '--staging', str(staging))
+    plan_path = root / '.linktool' / 'plan-stage.json'
+    assert call(*args) == 3
+    _accept(plan_path)
+    assert call(*args) == 0
+    assert not os.path.lexists(root / 'link.lnk')
+
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    restore_plan = staging / '.linktool' / 'plan-restore.json'
+    restore_args = ('restore', '--root', str(root), '--staging', str(staging))
+    assert call(*restore_args) == 3
+    assert [str(question['id']).split('-')[0] for question in _questions(restore_plan)] == [
+        'unavailable'
+    ]
+
+    _answer(restore_plan, 'unavailable-', 'yes')
+    assert call(*restore_args) == 0
+
+    assert not os.path.lexists(root / 'link.lnk')
+    assert (staging / 'files' / 'link.lnk').is_symlink()
+
+
+def test_stage_says_so_when_every_member_was_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'docs' / 'inner.bin', b'payload')
+    _symlink('docs', root / 'link-a', is_dir=True)
+    _symlink('docs', root / 'link-b', is_dir=True)
+    staging = tmp_path / 'stage'
+
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    args = ('stage', '--root', str(root), '--staging', str(staging))
+    plan_path = root / '.linktool' / 'plan-stage.json'
+    assert call(*args) == 3
+    _answer(plan_path, 'unavailable-', 'yes')
+    capsys.readouterr()
+
+    assert call(*args) == 0
+    assert '跳过 2 条目标卷不支持符号链接的链接' in capsys.readouterr().err
+
+
 def test_copy_fallback_confirms_size_and_keeps_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

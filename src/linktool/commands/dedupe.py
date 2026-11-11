@@ -1,9 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
 from linktool import EXIT_OK, errors, identify, log, plan, scan, state
 from linktool.commands import shared
 from linktool.config import Config, ConfigError
-from linktool.fs import Kind, move_file, move_link, remove_path
+from linktool.fs import Kind, Prober, existing_ancestor, move_file, move_link, remove_path
 from linktool.paths import is_within, plain, to_rel
 
 
@@ -45,15 +46,23 @@ def run(config: Config, *, stage: bool) -> int:
     groups.sort(key=lambda group: group.key)
 
     decisions: list[dict[str, object]] = []
+    blocked: list[str] = []
+    prober = Prober()
     records = [
         record
         for group in groups
-        if (record := _decide(group, root, config, ask, decisions)) is not None
+        if (record := _decide(group, root, config, ask, decisions, blocked, staging, prober))
+        is not None
     ]
+    if blocked:
+        shared.confirm_unavailable(ask, blocked, verb='暂存', keeping='留在受管树里')
     if ask.questions:
         return shared.await_answers(plan_path, command, args, ask, decisions)
     if not records:
-        log.note('没有找到可处理的重复文件或链接')
+        log.note(
+            '没有可处理的重复文件或链接'
+            + (f'，跳过 {len(blocked)} 条目标卷不支持符号链接的链接' if blocked else '')
+        )
         plan.discard(plan_path)
         return EXIT_OK
     released = _ask_for_the_plan(ask, records, decisions)
@@ -78,6 +87,9 @@ def _decide(
     config: Config,
     ask: plan.Interrogator,
     decisions: list[dict[str, object]],
+    blocked: list[str],
+    staging: Path | None,
+    prober: Prober,
 ) -> state.GroupRecord | None:
     source = identify.auto_source(group, config.prefer, config.pick)
     reason = source.reason if source is not None else ''
@@ -109,6 +121,10 @@ def _decide(
     if not members:
         return None
     record = _record(root, group, decided, members)
+    if staging is not None:
+        record = _without_unstaged(record, staging, prober, blocked)
+        if record is None:
+            return None
     decisions.append(
         {
             'source': record.source_rel or record.source_abs,
@@ -118,6 +134,25 @@ def _decide(
         }
     )
     return record
+
+
+def _without_unstaged(
+    record: state.GroupRecord, staging: Path, prober: Prober, blocked: list[str]
+) -> state.GroupRecord | None:
+    '''Drop the links the staging volume cannot hold, naming them for one confirmation.'''
+    refused = {
+        member.label
+        for member in record.members
+        if member.kind is not Kind.FILE
+        and not prober.capabilities(
+            existing_ancestor(shared.staged_path(staging, member).parent)
+        ).symlink
+    }
+    if not refused:
+        return record
+    blocked.extend(sorted(refused))
+    kept = [member for member in record.members if member.label not in refused]
+    return replace(record, members=kept) if kept else None
 
 
 _REASONS = {

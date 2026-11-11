@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from linktool import EXIT_PENDING, log, plan, state
+from linktool import EXIT_PENDING, errors, log, plan, state
 from linktool.config import Config
 from linktool.paths import from_rel
 
@@ -41,6 +41,24 @@ def source_path(root: Path, group: state.GroupRecord) -> Path | None:
     if group.source_abs is not None:
         return Path(group.source_abs)
     return None
+
+
+def confirm_unavailable(
+    ask: plan.Interrogator, labels: Sequence[str], *, verb: str, keeping: str
+) -> None:
+    '''Ask whether the members whose volume refuses links may be skipped.
+
+    A link has no form that a volume without symlink support can hold, so the members
+    either stay where they are or the whole run stops.
+    '''
+    gate = ask.confirm(
+        plan.short_id('unavailable', *labels),
+        f'{len(labels)} 条链接的目标卷不支持符号链接，无法{verb}：\n'
+        + '\n'.join(labels)
+        + f'\n这些成员会{keeping}，其余成员继续。确认吗？（yes/no）',
+    )
+    if gate is False:
+        raise errors.ToolError('跳过未获确认，本次未执行')
 
 
 def await_answers(

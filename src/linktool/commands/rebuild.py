@@ -13,6 +13,7 @@ from linktool.fs import (
     copy_file,
     create_hardlink,
     create_symlink,
+    existing_ancestor,
     remove_path,
     set_times,
 )
@@ -50,14 +51,7 @@ def run(config: Config) -> int:
         blocked.extend(refused)
 
     if blocked:
-        gate = ask.confirm(
-            plan.short_id('unavailable', *blocked),
-            f'{len(blocked)} 条链接的目标卷不支持符号链接，无法重建：\n'
-            + '\n'.join(blocked)
-            + f'\n这些成员会保持待重建，其余 {len(actions)} 条继续。确认吗？（yes/no）',
-        )
-        if gate is False:
-            raise errors.ToolError('跳过未获确认，本次未执行')
+        shared.confirm_unavailable(ask, blocked, verb='重建', keeping='保持待重建')
 
     copies = [action for action in actions if action.method is Built.COPY]
     if copies:
@@ -152,7 +146,7 @@ def _method(
     prober: Prober,
 ) -> Built | None:
     '''The form to rebuild one member in, or None when its volume refuses symlinks.'''
-    folder = _nearest(target.parent)
+    folder = existing_ancestor(target.parent)
     capabilities = prober.capabilities(folder)
     if group.dir_target is not None or member.kind is not Kind.FILE:
         return Built.SYMLINK if capabilities.symlink else None
@@ -161,13 +155,6 @@ def _method(
     if capabilities.symlink:
         return Built.SYMLINK
     return Built.COPY
-
-
-def _nearest(path: Path) -> Path:
-    current = path
-    while not current.exists() and current != current.parent:
-        current = current.parent
-    return current
 
 
 def _same_volume(first: Path, second: Path) -> bool:

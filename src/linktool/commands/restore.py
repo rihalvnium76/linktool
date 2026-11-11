@@ -5,7 +5,7 @@ from pathlib import Path
 from linktool import EXIT_OK, errors, log, plan, state
 from linktool.commands import shared
 from linktool.config import Config
-from linktool.fs import Kind, move_file, move_link, remove_path
+from linktool.fs import Kind, Prober, existing_ancestor, move_file, move_link, remove_path
 
 
 def run(config: Config) -> int:
@@ -25,12 +25,20 @@ def run(config: Config) -> int:
         return EXIT_OK
 
     actions: list[tuple[state.MemberRecord, Path, Path, bool]] = []
+    blocked: list[str] = []
+    prober = Prober()
     for item in items:
         source = shared.staged_path(staging, item)
         if not os.path.lexists(source):
             log.warn(f'暂存区里缺少 {item.label}，跳过')
             continue
         target = shared.member_path(root, item)
+        if (
+            item.kind is not Kind.FILE
+            and not prober.capabilities(existing_ancestor(target.parent)).symlink
+        ):
+            blocked.append(item.label)
+            continue
         replace = False
         if os.path.lexists(target):
             choice = ask.choose(
@@ -46,6 +54,8 @@ def run(config: Config) -> int:
             replace = True
         actions.append((item, source, target, replace))
 
+    if blocked:
+        shared.confirm_unavailable(ask, blocked, verb='还原', keeping='留在暂存区')
     if ask.questions:
         return shared.await_answers(plan_path, 'restore', args, ask)
 
