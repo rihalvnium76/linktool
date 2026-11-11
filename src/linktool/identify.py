@@ -64,7 +64,8 @@ def build(entries: Sequence[Entry]) -> list[Group]:
         real = Path(os.path.realpath(entry.path))
         try:
             info = os.stat(real)
-        except OSError:
+        except OSError as error:
+            log.warn(f'跳过无法解析目标的链接 {entry.path}: {error.strerror}')
             continue
         if stat.S_ISDIR(info.st_mode):
             _remember(dirs, plain(real), real, 0, entry)

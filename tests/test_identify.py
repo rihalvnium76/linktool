@@ -85,10 +85,16 @@ def test_hardlinks_read_their_content_once(tmp_path: Path, monkeypatch: pytest.M
     ]
 
 
-def test_broken_symlink_forms_no_group(tmp_path: Path) -> None:
+def test_broken_symlink_forms_no_group_and_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _symlink(tmp_path / 'missing.bin', tmp_path / 'dangling.bin')
     _symlink('missing.bin', tmp_path / 'dangling2.bin')
+    warned: list[str] = []
+    monkeypatch.setattr(identify.log, 'warn', warned.append)
     assert identify.build(_entries(tmp_path)) == []
+    assert len(warned) == 2
+    assert all('dangling' in line for line in warned)
 
 
 def test_directory_links_group_by_target(tmp_path: Path) -> None:
