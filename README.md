@@ -4,6 +4,24 @@
 主要用在 Windows 与 Android/Termux 之间搬运目录：先在本机把重复项移走，让复制工具只搬
 唯一的内容，到了目标机再按记录把链接补回来。
 
+## 运行
+
+仓库自带 `uv` 环境：
+
+```
+uv sync
+uv run linktool --help
+```
+
+用系统 Python 时把 `src` 加进导入路径，`xxhash` 需要预先装好：
+
+```
+PYTHONPATH=src python -m linktool --help
+```
+
+`python -m pip install .` 把 `linktool` 装进 `PATH`，构建过程要联网取 hatchling。需要
+Python 3.14 以上。
+
 ## 命令
 
 | 命令 | 作用 |
