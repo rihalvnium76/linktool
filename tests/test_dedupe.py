@@ -220,6 +220,37 @@ def test_rebuild_keeps_a_link_a_link(tmp_path: Path) -> None:
     assert rebuilt.resolve() == (root / 'a.bin').resolve()
 
 
+def test_links_whose_volume_refuses_symlinks_ask_before_skipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'docs' / 'inner.bin', b'payload')
+    _symlink('docs', root / 'link-a', is_dir=True)
+    _symlink('docs', root / 'link-b', is_dir=True)
+
+    args = ('remove', '--root', str(root))
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-remove.json')
+    assert call(*args) == 0
+    assert not (root / 'link-a').exists()
+
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    plan_path = root / '.linktool' / 'plan-rebuild.json'
+    assert call('rebuild', '--root', str(root)) == 3
+    questions = _questions(plan_path)
+    assert [str(question['id']).split('-')[0] for question in questions] == ['unavailable']
+    assert 'link-a' in str(questions[0]['prompt'])
+
+    _answer(plan_path, 'unavailable-', 'no')
+    assert call('rebuild', '--root', str(root)) == 1
+    assert not (root / 'link-a').exists()
+
+    _answer(plan_path, 'unavailable-', 'yes')
+    assert call('rebuild', '--root', str(root)) == 0
+    assert not (root / 'link-a').exists()
+    assert not (root / 'link-b').exists()
+
+
 def test_copy_fallback_confirms_size_and_keeps_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

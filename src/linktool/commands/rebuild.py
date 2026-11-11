@@ -43,8 +43,21 @@ def run(config: Config) -> int:
     ask = plan.Interrogator(plan.answers(plan_path, 'rebuild', args))
     prober = Prober()
     actions: list[Action] = []
+    blocked: list[str] = []
     for group in pending:
-        actions.extend(_plan_group(group, root, config, ask, prober))
+        planned, refused = _plan_group(group, root, config, ask, prober)
+        actions.extend(planned)
+        blocked.extend(refused)
+
+    if blocked:
+        gate = ask.confirm(
+            plan.short_id('unavailable', *blocked),
+            f'{len(blocked)} 条链接的目标卷不支持符号链接，无法重建：\n'
+            + '\n'.join(blocked)
+            + f'\n这些成员会保持待重建，其余 {len(actions)} 条继续。确认吗？（yes/no）',
+        )
+        if gate is False:
+            raise errors.ToolError('跳过未获确认，本次未执行')
 
     copies = [action for action in actions if action.method is Built.COPY]
     if copies:
@@ -73,10 +86,11 @@ def run(config: Config) -> int:
 
 def _plan_group(
     group: state.GroupRecord, root: Path, config: Config, ask: plan.Interrogator, prober: Prober
-) -> list[Action]:
+) -> tuple[list[Action], list[str]]:
+    '''Plan one group's rebuilds, and name the members whose volume refuses links.'''
     members = [member for member in group.members if member.status == state.PENDING]
     if not members:
-        return []
+        return [], []
     source = shared.source_path(root, group)
     if source is None or not source.exists():
         answer = ask.fill(
@@ -86,11 +100,11 @@ def _plan_group(
             (),
         )
         if answer is None or answer == 'skip':
-            return []
+            return [], []
         source = Path(answer)
         if not source.exists():
             log.warn(f'替代源不存在：{source}')
-            return []
+            return [], []
 
     if not is_within(source, root):
         gate = ask.confirm(
@@ -98,17 +112,22 @@ def _plan_group(
             f'重建的源在受管树之外：{source}\n确认以它作为源吗？（yes/no）',
         )
         if gate is None or not gate:
-            return []
+            return [], []
 
     actions: list[Action] = []
+    blocked: list[str] = []
     for member in members:
         target = shared.member_path(root, member)
-        method = _method(group, member, source, target, prober)
-        if not os.path.lexists(target):
-            actions.append(Action(group, member, source, target, method))
-            continue
-        if _satisfied(target, source, group):
+        present = os.path.lexists(target)
+        if present and _satisfied(target, source, group):
             actions.append(Action(group, member, source, target, None))
+            continue
+        method = _method(group, member, source, target, prober)
+        if method is None:
+            blocked.append(member.label)
+            continue
+        if not present:
+            actions.append(Action(group, member, source, target, method))
             continue
         choice = ask.choose(
             plan.short_id('clash', member.label),
@@ -122,7 +141,7 @@ def _plan_group(
         if choice is None or choice == 'skip':
             continue
         actions.append(Action(group, member, source, target, method, replace=True))
-    return actions
+    return actions, blocked
 
 
 def _method(
@@ -131,11 +150,12 @@ def _method(
     source: Path,
     target: Path,
     prober: Prober,
-) -> Built:
-    if group.dir_target is not None or member.kind is not Kind.FILE:
-        return Built.SYMLINK
+) -> Built | None:
+    '''The form to rebuild one member in, or None when its volume refuses symlinks.'''
     folder = _nearest(target.parent)
     capabilities = prober.capabilities(folder)
+    if group.dir_target is not None or member.kind is not Kind.FILE:
+        return Built.SYMLINK if capabilities.symlink else None
     if capabilities.hardlink and _same_volume(source, folder):
         return Built.HARDLINK
     if capabilities.symlink:
