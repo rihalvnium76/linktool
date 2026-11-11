@@ -129,7 +129,8 @@ def answers(path: Path, command: str, args: Mapping[str, str]) -> dict[str, str]
     if stored_command != command or stored_args != dict(args):
         raise PlanError(
             f'{path} 属于「{stored_command}」命令或另一组参数。\n'
-            '改回原来的参数，或删除该文件后重新运行。'
+            '改回原来的参数，或把 args 段改成这次的参数再重跑，已填的答案会继续沿用。'
+            '删除该文件则重新提问。'
         )
     found: dict[str, str] = {
         key: value

@@ -30,7 +30,7 @@ PYTHONPATH=src python -m linktool --help
 | `fix` | 修复因源被移动而失效的符号链接 |
 | `init-config` | 写出带注释的配置模板 |
 
-`remove`、`stage`、`rebuild` 的执行形态是一致的：扫描或读状态，算出计划，无法自主决定的项写进 `<root>/.linktool/plan-<命令>.json` 并返回退出码 3，用户填好 `answer` 后重跑同一条命令才真正执行。
+`remove`、`stage`、`rebuild` 的执行形态是一致的：扫描或读状态，算出计划，无法自主决定的项写进 `<root>/.linktool/plan-<命令>.json` 并返回退出码 3，用户填好 `answer` 后重跑同一条命令才真正执行。计划文件的 `args` 段记着生成它的全部设置，重跑时逐项比对，命令或任何一项设置不同就拒绝；想沿用已填的答案，把 `args` 段改成这次的参数再重跑。
 
 计划文件的 `decisions` 段列出这一轮由规则定下的每个源及其依据，`answers` 段记着已经答过、还在沿用的答案。`remove` 与 `stage` 另有一道总确认：整份计划汇成一题，答 yes 之前磁盘上不会有任何改动，所以这两个命令常规是两轮。
 
