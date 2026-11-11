@@ -60,6 +60,31 @@ def test_hardlinks_form_one_group(tmp_path: Path) -> None:
     assert len(groups[0].members) == 2
 
 
+def test_hardlinks_read_their_content_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path / 'a.bin', b'payload', 1)
+    os.link(tmp_path / 'a.bin', tmp_path / 'b.bin')
+    os.link(tmp_path / 'a.bin', tmp_path / 'c.bin')
+    _write(tmp_path / 'copy.bin', b'payload', 2)
+
+    calls: list[Path] = []
+    digest = hashing.full
+
+    def counting(size: int, path: Path) -> hashing.Identity:
+        calls.append(path)
+        return digest(size, path)
+
+    monkeypatch.setattr(hashing, 'full', counting)
+    groups = identify.build(_entries(tmp_path))
+    assert len(calls) == 2
+    assert len(groups) == 1
+    assert sorted(member.entry.label for member in groups[0].members) == [
+        'a.bin',
+        'b.bin',
+        'c.bin',
+        'copy.bin',
+    ]
+
+
 def test_broken_symlink_forms_no_group(tmp_path: Path) -> None:
     _symlink(tmp_path / 'missing.bin', tmp_path / 'dangling.bin')
     _symlink('missing.bin', tmp_path / 'dangling2.bin')

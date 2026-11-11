@@ -59,7 +59,7 @@ def build(entries: Sequence[Entry]) -> list[Group]:
                 log.warn(f'跳过无法读取的文件 {real}: {error.strerror}')
                 continue
             if stat.S_ISREG(info.st_mode):
-                _remember(files, real, info.st_size, entry)
+                _remember(files, _file_key(real, info), real, info.st_size, entry)
             continue
         real = Path(os.path.realpath(entry.path))
         try:
@@ -67,15 +67,25 @@ def build(entries: Sequence[Entry]) -> list[Group]:
         except OSError:
             continue
         if stat.S_ISDIR(info.st_mode):
-            _remember(dirs, real, 0, entry)
+            _remember(dirs, plain(real), real, 0, entry)
         elif stat.S_ISREG(info.st_mode):
-            _remember(files, real, info.st_size, entry)
+            _remember(files, _file_key(real, info), real, info.st_size, entry)
 
     return [*_file_groups(files), *_dir_groups(dirs)]
 
 
-def _remember(bucket: dict[str, _Real], real: Path, size: int, entry: Entry) -> None:
-    key = plain(real)
+def _file_key(real: Path, info: os.stat_result) -> str:
+    '''One key per file object, so links to one inode have their content read once.
+
+    A filesystem that fabricates inodes reports zero for every file, and keying by that
+    would collapse them all, so only a numbered inode of a linked file shares its key.
+    '''
+    if info.st_nlink > 1 and info.st_ino != 0:
+        return f'ino:{info.st_dev}:{info.st_ino}'
+    return plain(real)
+
+
+def _remember(bucket: dict[str, _Real], key: str, real: Path, size: int, entry: Entry) -> None:
     existing = bucket.get(key)
     if existing is None:
         bucket[key] = _Real(path=real, size=size, entries=[entry])
@@ -104,7 +114,9 @@ def _file_groups(files: dict[str, _Real]) -> list[Group]:
     groups: list[Group] = []
     for identity, reals in identities.items():
         members = [
-            Participant(entry=entry, real=real.path) for real in reals for entry in real.entries
+            Participant(entry=entry, real=entry.path if entry.kind is Kind.FILE else real.path)
+            for real in reals
+            for entry in real.entries
         ]
         if _distinct(members) < 2:
             continue
