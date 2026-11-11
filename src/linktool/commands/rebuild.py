@@ -55,7 +55,7 @@ def run(config: Config) -> int:
             f'预估总大小 {size} 字节。确认吗？（yes/no）',
         )
         if gate is False:
-            raise errors.ToolError('你否决了创建副本，本次未执行')
+            raise errors.ToolError('创建副本未获确认，本次未执行')
 
     if ask.questions:
         return shared.await_answers(plan_path, 'rebuild', args, ask)

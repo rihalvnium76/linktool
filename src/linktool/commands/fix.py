@@ -102,7 +102,7 @@ def run(config: Config) -> int:
         if gate is None:
             return shared.await_answers(plan_path, 'fix', args, ask)
         if not gate:
-            raise errors.ToolError('你否决了受管树之外的扫描路径，本次未执行')
+            raise errors.ToolError('受管树之外的扫描路径未获确认，本次未执行')
 
     result = scan.collect(scans, root, [folder])
     broken = sorted(

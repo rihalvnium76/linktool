@@ -9,13 +9,13 @@ from linktool.errors import ToolError
 
 INTRO = (
     '本文件由 linktool 生成。decisions 段是这一轮由规则定下的全部决定，'
-    'questions 段是工具无法自行决定、或需要你放行的项。\n'
+    'questions 段是工具无法自行决定、或需要用户放行的项。\n'
     '在每一题的 answer 字段填入答案，然后重新运行同一条命令；'
     '命令行参数必须与生成本文件时一致。\n'
     'answers 段记着已经答过、本轮还在沿用的答案。\n'
     'confirm 题填 yes 或 no；choice 题填候选序号、候选值或 skip；'
     'fill 题填候选序号、路径或 skip。\n'
-    '工具不会猜你的意思：填了无效答案会在这里标出原因，等你重填。'
+    '工具不会猜用户的意思：填了无效答案会在这里标出原因，等用户重填。'
 )
 
 

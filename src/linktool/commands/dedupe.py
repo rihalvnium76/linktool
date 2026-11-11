@@ -36,7 +36,7 @@ def run(config: Config, *, stage: bool) -> int:
         if gate is None:
             return shared.await_answers(plan_path, command, args, ask)
         if not gate:
-            raise ConfigError('你否决了受管树之外的扫描路径，本次未执行')
+            raise ConfigError('受管树之外的扫描路径未获确认，本次未执行')
 
     exclude = [folder]
     if staging is not None:
@@ -61,7 +61,7 @@ def run(config: Config, *, stage: bool) -> int:
         return shared.await_answers(plan_path, command, args, ask, decisions)
     if not released:
         raise errors.ToolError(
-            f'你否决了这份计划，磁盘上没有任何改动。'
+            f'这份计划未获确认，磁盘上没有任何改动。'
             f'把 {plan_path} 里 plan- 开头的题改成 yes 可重新放行。'
         )
 
@@ -124,7 +124,7 @@ _REASONS = {
     'link': '符号链接的 realpath 唯一',
     'prefer': '偏好目录下唯一',
     'fallback': '无规则可依，按路径排序取最前',
-    'yours': '你在本文件中指定',
+    'yours': '由用户在本文件中指定',
 }
 
 
