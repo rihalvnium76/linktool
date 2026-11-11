@@ -90,7 +90,7 @@ junction 按目录链接处理，重建时变成目录符号链接，转换时�
 
 ## 配置
 
-`linktool init-config` 写出的模板覆盖全部设置：`root`、`staging`、`scan`、`prefer`、`base_dir`、`rel_mode`。命令行参数优先于配置文件，默认读工作目录下的 `linktool.toml`。
+`linktool init-config` 写出的模板覆盖全部设置：`root`、`staging`、`scan`、`prefer`、`base_dir`、`rel_mode`、`pick`。命令行参数优先于配置文件，默认读工作目录下的 `linktool.toml`。`--scan` 和 `--prefer` 可以重复，一旦给出就整份替换配置文件里的同名列表。
 
 `--root` 是状态文件的锚点，决定记录里相对路径的基准。`--base-dir` 只决定链接指向写成相对还是绝对，默认等于 `root`，可以设为 `root` 的上级，让两棵独立的树之间也能用相对路径。`--rel-mode` 取 `base`（只在 `base_dir` 内转相对）、`all`（全部尝试）或 `off`（保留绝对）。
 
