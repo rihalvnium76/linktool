@@ -28,6 +28,7 @@ class MemberRecord:
     abs: str | None
     kind: Kind
     mtime_ns: int
+    birth_ns: int | None
     target_is_dir: bool | None
     status: str
     built: str | None = None
@@ -42,6 +43,7 @@ class MemberRecord:
             'abs': self.abs,
             'kind': str(self.kind),
             'mtime_ns': self.mtime_ns,
+            'birth_ns': self.birth_ns,
             'target_is_dir': self.target_is_dir,
             'status': self.status,
             'built': self.built,
@@ -55,6 +57,7 @@ class MemberRecord:
             abs=jsonio.maybe_text(source, 'abs'),
             kind=Kind(jsonio.text(source, 'kind')),
             mtime_ns=jsonio.integer(source, 'mtime_ns'),
+            birth_ns=jsonio.maybe_integer(source, 'birth_ns'),
             target_is_dir=jsonio.flag(source, 'target_is_dir'),
             status=jsonio.text(source, 'status'),
             built=jsonio.maybe_text(source, 'built'),
@@ -192,15 +195,21 @@ class StateStore:
         self.save()
         self._journal.drop()
 
-    def begin_relink(self, label: str, text: str, mtime_ns: int) -> None:
+    def begin_relink(self, label: str, text: str, mtime_ns: int, birth_ns: int | None) -> None:
         '''Leave one link's coming replacement in the journal, which survives a crash.
 
         The line carries no key, so replaying the journal skips it and the run's own
         `flush` drops it. A crash leaves it as the only trace of the path being
-        replaced, with the text and mtime a person needs to redo it.
+        replaced, with the text and times a person needs to redo it.
         '''
         self._journal.append(
-            {'phase': 'begin', 'member': label, 'link_text': text, 'mtime_ns': mtime_ns}
+            {
+                'phase': 'begin',
+                'member': label,
+                'link_text': text,
+                'mtime_ns': mtime_ns,
+                'birth_ns': birth_ns,
+            }
         )
 
     def pending(self) -> list[GroupRecord]:

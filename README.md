@@ -62,7 +62,7 @@ linktool rebuild --root /storage/emulated/0/tree
 
 ## 状态与记录
 
-`<root>/.linktool/state.json` 记录每一组的源、每个被移走路径的原形态、mtime 和重建状态；`state.jsonl` 是逐条进度的追加日志，收尾时折回 `state.json`，崩溃后下次启动先折一次。两份文件都随树复制，因此目标机不需要源机在位。
+`<root>/.linktool/state.json` 记录每一组的源、每个被移走路径的原形态、修改时间、创建时间（只有 Windows 读得到）和重建状态；`state.jsonl` 是逐条进度的追加日志，收尾时折回 `state.json`，崩溃后下次启动先折一次。两份文件都随树复制，因此目标机不需要源机在位。
 
 暂存区自己拥有 `<staging>/.linktool/staging.json`，记录被移动路径的原位置。暂存区必须位于受管树之外，否则复制工具会把它一起搬走。
 
@@ -94,19 +94,27 @@ linktool rebuild --root /storage/emulated/0/tree
 
 目标卷不支持符号链接时，链接没有可以降级的形态，这些成员连同路径写进问题文件，确认后跳过：重建时保持待重建，还原时留在暂存区，暂存时留在受管树里，其余成员照常处理。
 
+## 时间戳
+
+副本、建成的链接、暂存与还原搬运的文件和链接都带上记录里的修改时间，Windows 上还带上创建时间，NTFS 上精确到 100 纳秒。
+
+Windows 上 `os.utime` 的 `follow_symlinks=False` 抛 `NotImplementedError`，链接自身的修改时间没有其他 Python 接口能写，所以 `fs.set_times` 用 `SetFileInformationByHandle`：以 `FILE_FLAG_OPEN_REPARSE_POINT` 打开链接本身，一次写入 `CreationTime` 与 `LastWriteTime`，不碰链接指向的目标。
+
+Windows 之外的平台没有写创建时间的接口，创建时间停在重建的那一刻，修改时间对文件和链接都能写。硬链接与源共享 inode，两个时间都随源，无法单独设置。
+
+设置时间失败只输出警告，路径的内容与指向已经就位。
+
 ## 平台差异
 
 Windows 上 `os.rename`、`os.replace`、`shutil.move` 作用在链接的目标上，链接本身的移动一律是「读指向，在新位置重建，再删旧的」。
 
-`fix` 换链接同样走这条路，删除与新建之间中断会让该路径消失。路径不存在就不在 `fix` 的扫描范围内，重跑 `fix` 不会处理它。所以 `fix` 在删掉每条失效链接之前往 `state.jsonl` 追加一行，记下路径、新指向与 mtime，成功收尾时这行随日志一起丢弃。中断后剩下的行就是现场：最后一行是当时正在处理的那条，照行里的指向与 mtime 手工建一条链接即可。
+`fix` 换链接同样走这条路，删除与新建之间中断会让该路径消失。路径不存在就不在 `fix` 的扫描范围内，重跑 `fix` 不会处理它。所以 `fix` 在删掉每条失效链接之前往 `state.jsonl` 追加一行，记下路径、新指向与 mtime，成功收尾时这行随日志一起丢弃。中断后剩下的行就是现场：最后一行是当时正在处理的那条，照行里的指向与时间手工建一条链接即可。
 
 Windows 记录链接自身指向文件还是目录（`st_file_attributes` 的 `FILE_ATTRIBUTE_DIRECTORY` 位），所以失效链接也能正确重建。POSIX 不记录也不需要，`os.symlink` 没有类型参数。
 
 `os.readlink` 在 Windows 上返回带 `\\?\` 前缀的绝对路径，读到的指向先去掉前缀再判断绝对与相对，否则 `isabs` 会把它判成相对路径。
 
 junction 按目录链接处理，重建时变成目录符号链接，转换时打一行警告。`os.path.islink` 认不出 junction，扫描时用 `os.path.isjunction` 一并识别，否则递归会钻进 junction 里。
-
-`os.utime(..., follow_symlinks=False)` 在 Windows 上抛 `NotImplementedError`，链接自身的 mtime 只能保留在 POSIX 上，Windows 上输出警告。硬链接与源共享 inode，它的 mtime 就是源的 mtime，无法单独设置。
 
 ## 参数
 

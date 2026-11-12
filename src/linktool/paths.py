@@ -22,6 +22,16 @@ def strip_verbatim(text: str) -> str:
     return text
 
 
+def verbatim(path: Path) -> str:
+    '''The extended-length form of an absolute path, which lifts the length limit.'''
+    text = os.path.abspath(path)
+    if text.startswith(VERBATIM):
+        return text
+    if text.startswith('\\\\'):
+        return VERBATIM_UNC + text[2:]
+    return VERBATIM + text
+
+
 def read_link(path: Path) -> str:
     return strip_verbatim(os.readlink(path))
 

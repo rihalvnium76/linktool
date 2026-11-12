@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from linktool import log
-from linktool.fs import Kind, link_is_dir
+from linktool.fs import Kind, birth_time, link_is_dir
 from linktool.paths import is_within, plain, read_link, to_rel
 
 SKIP_NAME = '.linktool'
@@ -18,6 +18,7 @@ class Entry:
     rel: str | None
     kind: Kind
     mtime_ns: int
+    birth_ns: int | None
     link_text: str | None
     target_is_dir: bool | None
 
@@ -78,6 +79,7 @@ def _entry(path: Path, root: Path | None, kind: Kind, info: os.stat_result) -> E
         rel=to_rel(path, root) if root is not None and is_within(path, root) else None,
         kind=kind,
         mtime_ns=info.st_mtime_ns,
+        birth_ns=birth_time(info),
         link_text=read_link(path) if is_link else None,
         target_is_dir=link_is_dir(path) if is_link else None,
     )

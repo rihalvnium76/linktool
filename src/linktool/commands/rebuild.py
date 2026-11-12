@@ -202,9 +202,14 @@ def _apply(actions: list[Action], config: Config, store: state.StateStore) -> in
             case Built.SYMLINK:
                 text = link_text(action.source, action.target, config.anchors(), config.rel_mode)
                 create_symlink(text, action.target, target_is_dir=_is_dir(action))
-                set_times(action.target, member.mtime_ns, follow=False)
+                set_times(action.target, member.mtime_ns, follow=False, birth_ns=member.birth_ns)
             case Built.COPY:
-                copy_file(action.source, action.target, member.mtime_ns)
+                copy_file(
+                    action.source,
+                    action.target,
+                    mtime_ns=member.mtime_ns,
+                    birth_ns=member.birth_ns,
+                )
         store.record(action.group.key, member.label, state.REBUILT, str(action.method))
         created += 1
     return created

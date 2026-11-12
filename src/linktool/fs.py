@@ -1,13 +1,14 @@
 import contextlib
 import os
 import shutil
+import sys
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from linktool import log
+from linktool import log, winstamp
 from linktool.paths import read_link
 
 # Windows 把「链接自身指向目录」记在链接的属性位上，目标是否还在都不影响这一位。
@@ -87,27 +88,55 @@ def move_link(source: Path, path: Path) -> None:
     kind = path_kind(source)
     if kind is Kind.JUNCTION:
         log.warn(f'junction 重建为目录符号链接 {path}')
+    mtime_ns, birth_ns = times_of(source)
     create_symlink(text, path, target_is_dir=link_is_dir(source))
+    set_times(path, mtime_ns, follow=False, birth_ns=birth_ns)
     os.unlink(source)
 
 
-def set_times(path: Path, mtime_ns: int, *, follow: bool) -> None:
+def set_times(path: Path, mtime_ns: int, *, follow: bool, birth_ns: int | None = None) -> None:
+    '''Give a freshly created path the times the original had.
+
+    Windows writes both times through a handle, because os.utime reaches neither on a
+    link. Elsewhere the filesystem offers no way to write a creation time, so only the
+    modification time comes back.
+    '''
     try:
-        os.utime(path, ns=(mtime_ns, mtime_ns), follow_symlinks=follow)
+        if sys.platform == 'win32':
+            winstamp.stamp(path, mtime_ns=mtime_ns, birth_ns=birth_ns, follow=follow)
+        else:
+            os.utime(path, ns=(mtime_ns, mtime_ns), follow_symlinks=follow)
     except NotImplementedError:
         log.warn(f'本平台无法设置链接自身的修改时间 {path}')
+    except OSError as error:
+        log.warn(f'设置时间失败 {path}: {error.strerror}')
 
 
-def copy_file(source: Path, path: Path, mtime_ns: int) -> None:
+def birth_time(info: os.stat_result) -> int | None:
+    '''Creation time, which Windows reports and can write; POSIX gives neither.'''
+    return info.st_birthtime_ns if sys.platform == 'win32' else None
+
+
+def times_of(path: Path) -> tuple[int, int | None]:
+    '''The modification and creation times a copy of this path must carry.'''
+    info = os.lstat(path)
+    return info.st_mtime_ns, birth_time(info)
+
+
+def copy_file(
+    source: Path, path: Path, *, mtime_ns: int | None = None, birth_ns: int | None = None
+) -> None:
+    '''Copy a file and date the copy from the record, or from the source when unrecorded.'''
+    if mtime_ns is None:
+        mtime_ns, birth_ns = times_of(source)
     path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, path)
-    set_times(path, mtime_ns, follow=True)
+    set_times(path, mtime_ns, follow=True, birth_ns=birth_ns)
 
 
 def move_file(source: Path, path: Path) -> None:
     '''Move a regular file, copying across volumes. The source goes only after the copy lands.'''
-    path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, path)
+    copy_file(source, path)
     os.unlink(source)
 
 
