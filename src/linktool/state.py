@@ -192,6 +192,17 @@ class StateStore:
         self.save()
         self._journal.drop()
 
+    def begin_relink(self, label: str, text: str, mtime_ns: int) -> None:
+        '''Leave one link's coming replacement in the journal, which survives a crash.
+
+        The line carries no key, so replaying the journal skips it and the run's own
+        `flush` drops it. A crash leaves it as the only trace of the path being
+        replaced, with the text and mtime a person needs to redo it.
+        '''
+        self._journal.append(
+            {'phase': 'begin', 'member': label, 'link_text': text, 'mtime_ns': mtime_ns}
+        )
+
     def pending(self) -> list[GroupRecord]:
         return [group for group in self.groups if any(m.status == PENDING for m in group.members)]
 

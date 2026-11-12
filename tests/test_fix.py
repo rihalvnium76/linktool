@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from linktool.cli import main
+from linktool.commands import fix
 from linktool.fs import Capabilities, Prober
 
 MTIME_NEW = 1_600_000_000_000_000_000
@@ -84,3 +85,41 @@ def test_fix_reports_nothing_to_do(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'a.bin', b'payload')
     assert call('fix', '--root', str(root)) == 0
+
+
+def test_a_crash_mid_relink_leaves_the_path_in_the_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'store' / 'moved.bin', b'payload')
+    _symlink(root / 'gone' / 'moved.bin', root / 'broken.lnk')
+    journal = root / '.linktool' / 'state.jsonl'
+    link_mtime = os.lstat(root / 'broken.lnk').st_mtime_ns
+
+    plan_path = root / '.linktool' / 'plan-fix.json'
+    assert call('fix', '--root', str(root)) == 3
+    _answer(plan_path, '1')
+
+    failing = [True]
+    original = fix.create_symlink
+
+    def maybe_crash(text: str, path: Path, *, target_is_dir: bool) -> None:
+        if failing[0]:
+            raise OSError(5, '模拟中断')
+        original(text, path, target_is_dir=target_is_dir)
+
+    monkeypatch.setattr(fix, 'create_symlink', maybe_crash)
+    with pytest.raises(OSError, match='模拟中断'):
+        call('fix', '--root', str(root))
+
+    assert not os.path.lexists(root / 'broken.lnk')
+    last = json.loads(journal.read_text(encoding='utf-8').splitlines()[-1])
+    assert last['member'] == 'broken.lnk'
+    assert last['link_text'] == os.path.join('store', 'moved.bin')
+    assert last['mtime_ns'] == link_mtime
+
+    failing[0] = False
+    _symlink(root / 'gone' / 'moved.bin', root / 'broken.lnk')
+    assert call('fix', '--root', str(root)) == 0
+    assert (root / 'broken.lnk').resolve() == (root / 'store' / 'moved.bin').resolve()
+    assert not journal.exists()
