@@ -80,7 +80,7 @@ linktool rebuild --root /storage/emulated/0/tree
 
 ## 平台差异
 
-Windows 上 `os.rename`、`os.replace`、`shutil.move` 作用在链接的目标上，链接本身的移动一律是「读指向，在新位置重建，再删旧的」。`fix` 换链接同样走这条路，删除与新建之间中断会让该路径消失，重跑 `fix` 扫不到已经不存在的路径，只能按 `state.json` 里的记录手工补建。
+Windows 上 `os.rename`、`os.replace`、`shutil.move` 作用在链接的目标上，链接本身的移动一律是「读指向，在新位置重建，再删旧的」。`fix` 换链接同样走这条路，删除与新建之间中断会让该路径消失。它已经不是失效链接，重跑 `fix` 扫不到它，要按保留下来的 `plan-fix.json` 里的候选手工补建。
 
 Windows 记录链接自身指向文件还是目录（`st_file_attributes` 的 `FILE_ATTRIBUTE_DIRECTORY` 位），所以失效链接也能正确重建。POSIX 不记录也不需要，`os.symlink` 没有类型参数。
 

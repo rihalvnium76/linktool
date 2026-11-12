@@ -153,8 +153,6 @@ def run(config: Config) -> int:
         remove_path(entry.path)
         create_symlink(text, entry.path, target_is_dir=source.is_dir())
         set_times(entry.path, entry.mtime_ns, follow=False)
-        store.relink(entry.label, text)
-    store.flush()
     plan.discard(plan_path)
     log.note(f'已修复 {len(actions)} 条链接，未处理 {len(broken) - len(actions)} 条')
     return EXIT_OK

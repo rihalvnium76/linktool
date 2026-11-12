@@ -226,7 +226,6 @@ def _record(
                 abs=None if member.entry.rel is not None else str(member.entry.path),
                 kind=member.entry.kind,
                 mtime_ns=member.entry.mtime_ns,
-                link_text=member.entry.link_text,
                 target_is_dir=member.entry.target_is_dir,
                 status=state.PENDING,
             )
@@ -250,7 +249,6 @@ def _apply(
                 abs=member.abs,
                 kind=member.kind,
                 mtime_ns=member.mtime_ns,
-                link_text=member.link_text,
                 target_is_dir=member.target_is_dir,
                 status=state.STAGED,
             )

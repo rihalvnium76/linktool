@@ -12,7 +12,6 @@ from linktool.hashing import Identity
 WORK_DIR = '.linktool'
 PENDING = 'pending'
 REBUILT = 'rebuilt'
-FAILED = 'failed'
 STAGED = 'staged'
 RESTORED = 'restored'
 
@@ -29,7 +28,6 @@ class MemberRecord:
     abs: str | None
     kind: Kind
     mtime_ns: int
-    link_text: str | None
     target_is_dir: bool | None
     status: str
     built: str | None = None
@@ -44,7 +42,6 @@ class MemberRecord:
             'abs': self.abs,
             'kind': str(self.kind),
             'mtime_ns': self.mtime_ns,
-            'link_text': self.link_text,
             'target_is_dir': self.target_is_dir,
             'status': self.status,
             'built': self.built,
@@ -58,7 +55,6 @@ class MemberRecord:
             abs=jsonio.maybe_text(source, 'abs'),
             kind=Kind(jsonio.text(source, 'kind')),
             mtime_ns=jsonio.integer(source, 'mtime_ns'),
-            link_text=jsonio.maybe_text(source, 'link_text'),
             target_is_dir=jsonio.flag(source, 'target_is_dir'),
             status=jsonio.text(source, 'status'),
             built=jsonio.maybe_text(source, 'built'),
@@ -190,14 +186,6 @@ class StateStore:
         self._apply(entry)
         self._journal.append(entry)
 
-    def relink(self, label: str, text: str) -> None:
-        for group in self.groups:
-            for member in group.members:
-                if member.label == label:
-                    member.link_text = text
-                    self._journal.append({'key': group.key, 'member': label, 'link_text': text})
-                    return
-
     def flush(self) -> None:
         if not self._journal.path.exists():
             return
@@ -231,9 +219,6 @@ class StateStore:
                 built = jsonio.maybe_text(entry, 'built')
                 if built is not None:
                     record.built = built
-                text = jsonio.maybe_text(entry, 'link_text')
-                if text is not None:
-                    record.link_text = text
                 return
 
 
