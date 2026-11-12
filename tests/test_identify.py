@@ -6,6 +6,7 @@ import pytest
 
 from linktool import hashing, identify, scan
 from linktool.config import Pick
+from linktool.fs import supports_hardlink
 
 
 def _entries(root: Path) -> list[scan.Entry]:
@@ -22,6 +23,12 @@ def _symlink(source: Path | str, target: Path, *, is_dir: bool = False) -> None:
         os.symlink(source, target, target_is_directory=is_dir)
     except OSError as error:
         pytest.skip(f'本机不能创建符号链接：{error}')
+
+
+def _hardlink(source: Path, target: Path) -> None:
+    if not supports_hardlink():
+        pytest.skip('这台设备的 Python 没有 os.link')
+    os.link(source, target)
 
 
 def _write(path: Path, content: bytes, mtime_ns: int) -> None:
@@ -54,7 +61,7 @@ def test_symlink_joins_the_group_of_its_target(tmp_path: Path) -> None:
 
 def test_hardlinks_form_one_group(tmp_path: Path) -> None:
     _write(tmp_path / 'a.bin', b'payload', 1)
-    os.link(tmp_path / 'a.bin', tmp_path / 'b.bin')
+    _hardlink(tmp_path / 'a.bin', tmp_path / 'b.bin')
     groups = identify.build(_entries(tmp_path))
     assert len(groups) == 1
     assert len(groups[0].members) == 2
@@ -62,8 +69,8 @@ def test_hardlinks_form_one_group(tmp_path: Path) -> None:
 
 def test_hardlinks_read_their_content_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(tmp_path / 'a.bin', b'payload', 1)
-    os.link(tmp_path / 'a.bin', tmp_path / 'b.bin')
-    os.link(tmp_path / 'a.bin', tmp_path / 'c.bin')
+    _hardlink(tmp_path / 'a.bin', tmp_path / 'b.bin')
+    _hardlink(tmp_path / 'a.bin', tmp_path / 'c.bin')
     _write(tmp_path / 'copy.bin', b'payload', 2)
 
     calls: list[Path] = []
@@ -145,7 +152,7 @@ def test_quick_digest_separates_same_size(tmp_path: Path) -> None:
 
 def test_auto_source_counts_hardlinks_in_preferred_directory_as_one(tmp_path: Path) -> None:
     _write(tmp_path / 'keep' / 'a.bin', b'payload', 1)
-    os.link(tmp_path / 'keep' / 'a.bin', tmp_path / 'keep' / 'b.bin')
+    _hardlink(tmp_path / 'keep' / 'a.bin', tmp_path / 'keep' / 'b.bin')
     _write(tmp_path / 'other' / 'c.bin', b'payload', 2)
     group = identify.build(_entries(tmp_path))[0]
     assert _source(group, (tmp_path / 'keep',)) == tmp_path / 'keep' / 'a.bin'

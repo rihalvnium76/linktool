@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from linktool.cli import main
-from linktool.fs import Capabilities, Prober
+from linktool.fs import Capabilities, Prober, supports_hardlink
 
 MTIME_NEW = 1_600_000_000_000_000_000
 MTIME_OLD = 1_500_000_000_000_000_000
@@ -66,6 +66,8 @@ def _no_links(self: Prober, folder: Path) -> Capabilities:
 
 
 def test_remove_then_rebuild_restores_a_hardlink(tmp_path: Path) -> None:
+    if not supports_hardlink():
+        pytest.skip('这台设备的 Python 没有 os.link')
     root = tmp_path / 'tree'
     _write(root / 'keep' / 'a.bin', b'payload')
     _write(root / 'other' / 'b.bin', b'payload')
