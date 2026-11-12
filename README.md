@@ -28,6 +28,7 @@ PYTHONPATH=src python -m linktool --help
 | `rebuild` | 按状态文件把被移走的路径重建为硬链接、符号链接或副本 |
 | `restore` | 把暂存区里的条目移回原位 |
 | `fix` | 修复因源被移动而失效的符号链接 |
+| `status` | 列出待重建与待还原的条目 |
 
 `remove`、`stage`、`rebuild` 的执行形态是一致的：扫描或读状态，算出计划，无法自主决定的项写进 `<root>/.linktool/plan-<命令>.json` 并返回退出码 3，用户填好 `answer` 后重跑同一条命令才真正执行。计划文件的 `args` 段记着生成它的全部设置，重跑时逐项比对，命令或任何一项设置不同就拒绝；想沿用已填的答案，把 `args` 段改成这次的参数再重跑。
 
@@ -63,6 +64,8 @@ linktool rebuild --root /storage/emulated/0/tree
 
 暂存区自己拥有 `<staging>/.linktool/staging.json`，记录被移动路径的原位置。暂存区必须位于受管树之外，否则复制工具会把它一起搬走。
 
+这两个目录都是工具的记忆，要清空由用户自己决定，`status` 报出它们各自还握着多少条记录。还有待重建成员时删掉 `state.json`，目标机的 `rebuild` 就失去依据，`fix` 也失去原来写进记录的目标名；还有待还原条目时删掉 `staging.json`，这些条目就失去原位置，`restore` 再也找不到它们。计划文件随时可删，代价是下次重跑要重新回答。
+
 路径在 `state.json` 里记成相对受管树的形式并且用 `/` 分隔，同一份记录在 Windows 的 `D:/tree` 和 Android 的 `/storage/emulated/0/tree` 上都能解析。受管树之外的路径记绝对路径，跨机后由用户重新指定。
 
 ## 判断重复
@@ -93,7 +96,7 @@ junction 按目录链接处理，重建时变成目录符号链接，转换时�
 
 `--base-dir` 只决定链接指向写成相对还是绝对，默认等于 `root`，可以设为 `root` 的上级，让两棵独立的树之间也能用相对路径。`--rel-mode` 取 `base`（只在 `base_dir` 内转相对）、`all`（全部尝试）或 `off`（保留绝对）。
 
-每条命令只接受自己读得到的参数：`stage` 与 `restore` 需要 `--staging`，`rebuild` 与 `fix` 接受 `--base-dir` 与 `--rel-mode`，`fix` 只扫链接不选源，所以没有 `--prefer` 与 `--pick`。重跑时要给出的设置保持一致，写进脚本比每次重新敲一遍省事。
+每条命令只接受自己读得到的参数：`stage`、`restore`、`status` 需要或可带 `--staging`，`rebuild` 与 `fix` 接受 `--base-dir` 与 `--rel-mode`，`fix` 只扫链接不选源，所以没有 `--prefer` 与 `--pick`。重跑时要给出的设置保持一致，写进脚本比每次重新敲一遍省事。
 
 ## 验证
 

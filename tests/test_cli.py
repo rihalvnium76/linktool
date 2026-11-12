@@ -40,3 +40,11 @@ def test_a_list_setting_takes_several_values_in_one_flag(
     assert cli.main(['remove', '--root', 'T', '--scan', 'a', 'b', '--scan', 'c']) == 0
 
     assert seen[0].scan == (Path.cwd() / 'a', Path.cwd() / 'b', Path.cwd() / 'c')
+
+
+def test_status_reads_the_two_records_it_reports_on(tmp_path: Path) -> None:
+    assert (
+        cli.main(['status', '--root', str(tmp_path / 'T'), '--staging', str(tmp_path / 'S')]) == 0
+    )
+    with pytest.raises(SystemExit):
+        cli.main(['status', '--root', str(tmp_path / 'T'), '--scan', 'a'])

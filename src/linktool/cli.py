@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import cast
 
 from linktool import EXIT_ERROR, config, log
-from linktool.commands import dedupe, fix, rebuild, restore
+from linktool.commands import dedupe, fix, rebuild, restore, status
 from linktool.errors import ToolError
 
 
@@ -30,6 +30,8 @@ def _dispatch(args: argparse.Namespace) -> int:
             return restore.run(settings)
         case 'fix':
             return fix.run(settings)
+        case 'status':
+            return status.run(settings)
         case _:
             raise ToolError(f'未知命令 {args.command}')
 
@@ -118,4 +120,5 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser(
         'fix', parents=[common, scanning, linking], help='修复因源被移动而失效的符号链接'
     )
+    commands.add_parser('status', parents=[common, staging], help='列出待重建与待还原的条目')
     return parser

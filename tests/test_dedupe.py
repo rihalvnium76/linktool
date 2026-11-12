@@ -415,3 +415,29 @@ def test_missing_os_link_falls_back_to_a_symlink(
     assert call(*args) == 0
     assert call('rebuild', '--root', str(root)) == 0
     assert (root / 'other' / 'b.bin').is_symlink()
+
+
+def test_status_counts_what_each_record_still_holds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    _write(root / 'other' / 'c.bin', b'payload')
+    staging = tmp_path / 'stage'
+    args = ('stage', '--root', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
+
+    capsys.readouterr()
+    assert call('status', '--root', str(root), '--staging', str(staging)) == 0
+    assert '没有待重建的条目' in capsys.readouterr().err
+
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-stage.json')
+    assert call(*args) == 0
+    capsys.readouterr()
+
+    assert call('status', '--root', str(root), '--staging', str(staging)) == 0
+    output = capsys.readouterr().err
+    assert '2 条待重建，分布在 1 组' in output
+    assert 'other/b.bin' in output
+    assert '2 条待还原' in output
