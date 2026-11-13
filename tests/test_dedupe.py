@@ -320,6 +320,37 @@ def test_rebuild_keeps_a_link_a_link(tmp_path: Path) -> None:
     assert rebuilt.resolve() == (root / 'a.bin').resolve()
 
 
+def test_a_link_rebuilds_as_a_copy_where_the_volume_refuses_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'a.bin', b'payload')
+    _symlink('a.bin', root / 'link.lnk')
+
+    args = ('remove', '--scan', str(root))
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-remove.json')
+    assert call(*args) == 0
+    assert not os.path.lexists(root / 'link.lnk')
+
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    plan_path = root / '.linktool' / 'plan-rebuild.json'
+    assert call('rebuild', '--state', str(root)) == 3
+    questions = _questions(plan_path)
+    assert [question.id.split('-')[0] for question in questions] == ['copy']
+    assert '7 字节' in questions[0].prompt
+
+    _answer(plan_path, 'copy-', 'yes')
+    assert call('rebuild', '--state', str(root)) == 0
+    rebuilt = root / 'link.lnk'
+    assert not rebuilt.is_symlink()
+    assert rebuilt.read_bytes() == b'payload'
+    recorded = json.loads((root / '.linktool' / 'state.json').read_text(encoding='utf-8'))
+    member = recorded['groups'][0]['members'][0]
+    assert member['kind'] == 'symlink'
+    assert member['built'] == 'copy'
+
+
 def test_links_whose_volume_refuses_symlinks_ask_before_skipping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

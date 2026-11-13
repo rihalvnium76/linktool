@@ -148,11 +148,18 @@ def _method(
     target: Path,
     prober: Prober,
 ) -> Built | None:
-    '''The form to rebuild one member in, or None when its volume refuses symlinks.'''
+    '''The form to rebuild one member in, or None when the volume refuses every form.
+
+    A member that stood for a file falls back to a copy of the same content whenever the
+    volume holds neither link. A directory link has no copy form, since the copy would
+    duplicate the whole tree behind it.
+    '''
     folder = existing_ancestor(target.parent)
     capabilities = prober.capabilities(folder)
-    if group.dir_target is not None or member.kind is not Kind.FILE:
+    if group.dir_target is not None:
         return Built.SYMLINK if capabilities.symlink else None
+    if member.kind is not Kind.FILE:
+        return Built.SYMLINK if capabilities.symlink else Built.COPY
     if capabilities.hardlink and same_volume(source, folder):
         return Built.HARDLINK
     if capabilities.symlink:
