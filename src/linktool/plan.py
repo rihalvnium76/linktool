@@ -41,17 +41,15 @@ class Question:
     settled: bool
     error: str | None = None
 
-    def to_json(self) -> dict[str, object]:
-        return {
-            'id': self.id,
-            'kind': self.kind,
-            'prompt': self.prompt,
-            'candidates': [
-                {'index': item.index, 'value': item.value, 'label': item.label}
-                for item in self.candidates
-            ],
-            'error': self.error,
-        }
+
+@dataclass(frozen=True, slots=True)
+class Decision:
+    '''One group's source and the members that give up their place for it.'''
+
+    source: str
+    reason: str
+    identity: str
+    paths: tuple[str, ...]
 
 
 class Interrogator:
@@ -155,19 +153,10 @@ def save(
     command: str,
     args: Mapping[str, str],
     ask: Interrogator,
-    decisions: Sequence[Mapping[str, object]],
+    decisions: Sequence[Decision],
 ) -> None:
-    jsonio.write(
-        path,
-        {
-            'version': VERSION,
-            'command': command,
-            'args': dict(args),
-            'decisions': list(decisions),
-            'questions': [question.to_json() for question in ask.reached],
-        },
-    )
-    sheet(path).write_text(_render(ask.reached, path.name), encoding='utf-8')
+    jsonio.write(path, {'version': VERSION, 'command': command, 'args': dict(args)})
+    sheet(path).write_text(_render(ask.reached, decisions, command, path.name), encoding='utf-8')
 
 
 def discard(path: Path) -> None:
@@ -175,14 +164,37 @@ def discard(path: Path) -> None:
     sheet(path).unlink(missing_ok=True)
 
 
-def _render(questions: Sequence[Question], plan_name: str) -> str:
-    lines = [f'# 本文件是 {plan_name} 的答案，由 linktool 生成。']
+def _render(
+    questions: Sequence[Question], decisions: Sequence[Decision], command: str, plan_name: str
+) -> str:
+    lines = [f'# 本文件与 {plan_name} 配套，工具只从这份文件读答案。']
     lines.extend(f'# {line}' for line in INTRO.splitlines())
     lines.append('')
+    if decisions:
+        lines.extend(_decisions_block(decisions, command))
+        lines.append('')
     for question in questions:
         lines.extend(_block(question))
         lines.append('')
     return '\n'.join(lines)
+
+
+def _decisions_block(decisions: Sequence[Decision], command: str) -> list[str]:
+    action = _ACTIONS.get(command, '移出原位')
+    lines = ['# decisions  这一轮的全部决定']
+    for number, decision in enumerate(decisions, start=1):
+        lines.extend(
+            (
+                '',
+                f'# 组 {number}  {decision.identity}',
+                f'#   源：{decision.source}（{decision.reason}）',
+            )
+        )
+        lines.extend(f'#   {action}：{path}' for path in decision.paths)
+    return lines
+
+
+_ACTIONS = {'remove': '移除', 'stage': '暂存'}
 
 
 def _block(question: Question) -> list[str]:

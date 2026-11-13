@@ -83,7 +83,7 @@ class Decider:
     prefer: tuple[Path, ...]
     pick: Pick
     prober: Prober = field(default_factory=Prober)
-    decisions: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
+    decisions: list[plan.Decision] = field(default_factory=list[plan.Decision])
     blocked: list[str] = field(default_factory=list[str])
 
     def decide(self, group: identify.Group) -> state.GroupRecord | None:
@@ -123,12 +123,12 @@ class Decider:
             if record is None:
                 return None
         self.decisions.append(
-            {
-                'source': record.source.label if record.source is not None else '',
-                'reason': _REASONS[reason],
-                'identity': _identity_note(group),
-                'paths': [member.label for member in record.members],
-            }
+            plan.Decision(
+                source=record.source.label if record.source is not None else '',
+                reason=_REASONS[reason],
+                identity=_identity_note(group),
+                paths=tuple(member.label for member in record.members),
+            )
         )
         return record
 
@@ -192,11 +192,11 @@ def _identity_note(group: identify.Group) -> str:
 def _ask_for_the_plan(
     ask: plan.Interrogator,
     records: list[state.GroupRecord],
-    decisions: list[dict[str, object]],
+    decisions: list[plan.Decision],
     plan_path: Path,
 ) -> bool | None:
     '''One gate for the whole plan: the rules proposed every source, the user releases them.'''
-    fallback = sum(1 for item in decisions if item['reason'] == _REASONS['fallback'])
+    fallback = sum(1 for decision in decisions if decision.reason == _REASONS['fallback'])
     total = sum(len(record.members) for record in records)
     extra = f'，其中 {fallback} 组由排序兜底选定' if fallback else ''
     seed = (
@@ -205,7 +205,7 @@ def _ask_for_the_plan(
     )
     return ask.confirm(
         plan.short_id('plan', *seed),
-        f'{plan_path.name} 的 decisions 段列出这一轮的全部决定：{len(records)} 组，'
+        f'本文件的 decisions 段列出这一轮的全部决定：{len(records)} 组，'
         f'{total} 条路径会被移除或暂存{extra}。\n'
         '确认之前磁盘上不会有任何改动。确认执行吗？（yes/no）',
     )

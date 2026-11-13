@@ -156,7 +156,7 @@ def await_answers(
     command: str,
     args: Mapping[str, str],
     ask: plan.Interrogator,
-    decisions: Sequence[Mapping[str, object]] = (),
+    decisions: Sequence[plan.Decision] = (),
 ) -> int:
     plan.save(plan_path, command, args, ask, decisions)
     log.note(f'有 {len(ask.pending)} 项需要确认，答案写在 {plan.sheet(plan_path)}')

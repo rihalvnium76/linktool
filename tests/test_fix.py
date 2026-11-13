@@ -9,6 +9,7 @@ import pytest
 from linktool.cli import main
 from linktool.commands import fix
 from linktool.fs import Capabilities, Prober
+from sheet import questions as _questions
 
 MTIME_NEW = 1_600_000_000_000_000_000
 
@@ -82,7 +83,8 @@ def test_fix_offers_a_same_name_candidate(tmp_path: Path) -> None:
     plan_path = root / '.linktool' / 'plan-fix.json'
     assert call('fix', '--scan', str(root)) == 3
     payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    assert payload['questions'][0]['kind'] == 'fill'
+    assert 'questions' not in payload
+    assert [question.kind for question in _questions(plan_path)] == ['fill']
 
     _answer(plan_path, '1')
     assert call('fix', '--scan', str(root)) == 0

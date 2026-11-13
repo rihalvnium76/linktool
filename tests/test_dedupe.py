@@ -3,12 +3,13 @@ import os
 import re
 
 from pathlib import Path
-from typing import cast
 
 import pytest
 
 from linktool.cli import main
 from linktool.fs import Capabilities, Prober, supports_hardlink
+from sheet import decisions as _decisions
+from sheet import questions as _questions
 
 MTIME_NEW = 1_600_000_000_000_000_000
 MTIME_OLD = 1_500_000_000_000_000_000
@@ -29,16 +30,6 @@ def _symlink(source: Path | str, target: Path, *, is_dir: bool = False) -> None:
         os.symlink(source, target, target_is_directory=is_dir)
     except OSError as error:
         pytest.skip(f'本机不能创建符号链接：{error}')
-
-
-def _plan(plan_path: Path) -> dict[str, object]:
-    return cast(dict[str, object], json.loads(plan_path.read_text(encoding='utf-8')))
-
-
-def _questions(plan_path: Path) -> list[dict[str, object]]:
-    raw = _plan(plan_path)['questions']
-    assert isinstance(raw, list)
-    return [cast(dict[str, object], item) for item in cast(list[object], raw)]
 
 
 def _sheet(plan_path: Path) -> Path:
@@ -63,12 +54,6 @@ def _accept(plan_path: Path) -> None:
     _answer(plan_path, 'plan-', 'yes')
 
 
-def _decisions(plan_path: Path) -> list[dict[str, object]]:
-    raw = _plan(plan_path)['decisions']
-    assert isinstance(raw, list)
-    return [cast(dict[str, object], item) for item in cast(list[object], raw)]
-
-
 def _no_links(self: Prober, folder: Path) -> Capabilities:
     return Capabilities(hardlink=False, symlink=False)
 
@@ -83,7 +68,7 @@ def test_remove_then_rebuild_restores_a_hardlink(tmp_path: Path) -> None:
     args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert all(str(question['id']).startswith('plan-') for question in _questions(plan_path))
+    assert all(question.id.startswith('plan-') for question in _questions(plan_path))
     _accept(plan_path)
 
     assert call(*args) == 0
@@ -97,19 +82,14 @@ def test_remove_then_rebuild_restores_a_hardlink(tmp_path: Path) -> None:
     assert rebuilt.stat().st_ino == (root / 'keep' / 'a.bin').stat().st_ino
 
 
-def test_plan_file_records_every_decision(tmp_path: Path) -> None:
+def test_the_answer_sheet_lists_every_decision(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'keep' / 'a.bin', b'payload')
     _write(root / 'other' / 'b.bin', b'payload')
     assert call('remove', '--scan', str(root), '--prefer', str(root / 'keep')) == 3
-    decisions = _decisions(root / '.linktool' / 'plan-remove.json')
-    assert decisions == [
-        {
-            'source': 'keep/a.bin',
-            'reason': '偏好目录下唯一',
-            'identity': decisions[0]['identity'],
-            'paths': ['other/b.bin'],
-        }
+    found = _decisions(root / '.linktool' / 'plan-remove.json')
+    assert [(item.source, item.reason, item.paths) for item in found] == [
+        ('keep/a.bin', '偏好目录下唯一', ('other/b.bin',))
     ]
 
 
@@ -120,7 +100,7 @@ def test_ambiguous_group_waits_for_an_answer(tmp_path: Path) -> None:
 
     assert call('remove', '--scan', str(root)) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert all(str(question['id']).startswith('source-') for question in _questions(plan_path))
+    assert all(question.id.startswith('source-') for question in _questions(plan_path))
     assert sorted(path.name for path in root.glob('*.bin')) == ['a.bin', 'b.bin']
 
     _answer(plan_path, 'source-', '1')
@@ -139,9 +119,9 @@ def test_pick_first_proposes_a_source_for_one_confirmation(tmp_path: Path) -> No
 
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert all(str(question['id']).startswith('plan-') for question in _questions(plan_path))
-    assert _decisions(plan_path)[0]['reason'] == '无规则可依，按路径排序取最前'
-    assert _decisions(plan_path)[0]['source'] == 'a.bin'
+    assert all(question.id.startswith('plan-') for question in _questions(plan_path))
+    assert _decisions(plan_path)[0].reason == '无规则可依，按路径排序取最前'
+    assert _decisions(plan_path)[0].source == 'a.bin'
 
     _accept(plan_path)
     assert call(*args) == 0
@@ -185,7 +165,7 @@ def test_invalid_answer_keeps_the_question(tmp_path: Path) -> None:
     plan_path = root / '.linktool' / 'plan-remove.json'
     _answer(plan_path, 'source-', '99')
     assert call('remove', '--scan', str(root)) == 3
-    assert _questions(plan_path)[0]['error'] is not None
+    assert _questions(plan_path)[0].error is not None
     assert [path.name for path in root.glob('*.bin')] == ['a.bin', 'b.bin']
 
 
@@ -332,8 +312,8 @@ def test_links_whose_volume_refuses_symlinks_ask_before_skipping(
     plan_path = root / '.linktool' / 'plan-rebuild.json'
     assert call('rebuild', '--state', str(root)) == 3
     questions = _questions(plan_path)
-    assert [str(question['id']).split('-')[0] for question in questions] == ['unavailable']
-    assert 'link-a' in str(questions[0]['prompt'])
+    assert [question.id.split('-')[0] for question in questions] == ['unavailable']
+    assert 'link-a' in questions[0].prompt
 
     _answer(plan_path, 'unavailable-', 'no')
     assert call('rebuild', '--state', str(root)) == 1
@@ -368,9 +348,7 @@ def test_stage_skips_links_the_staging_volume_cannot_hold(
     )
     plan_path = root / '.linktool' / 'plan-stage.json'
     assert call(*args) == 3
-    assert [str(question['id']).split('-')[0] for question in _questions(plan_path)] == [
-        'unavailable'
-    ]
+    assert [question.id.split('-')[0] for question in _questions(plan_path)] == ['unavailable']
 
     _answer(plan_path, 'unavailable-', 'yes')
     assert call(*args) == 3
@@ -401,9 +379,7 @@ def test_restore_keeps_a_link_staged_where_links_are_refused(
     restore_plan = root / '.linktool' / 'plan-restore.json'
     restore_args = ('restore', '--state', str(root))
     assert call(*restore_args) == 3
-    assert [str(question['id']).split('-')[0] for question in _questions(restore_plan)] == [
-        'unavailable'
-    ]
+    assert [question.id.split('-')[0] for question in _questions(restore_plan)] == ['unavailable']
 
     _answer(restore_plan, 'unavailable-', 'yes')
     assert call(*restore_args) == 0
@@ -462,7 +438,7 @@ def test_copy_fallback_confirms_size_and_keeps_mtime(
 
     plan_path = root / '.linktool' / 'plan-rebuild.json'
     assert call('rebuild', '--state', str(root)) == 3
-    assert all(str(question['id']).startswith('copy-') for question in _questions(plan_path))
+    assert all(question.id.startswith('copy-') for question in _questions(plan_path))
     _answer(plan_path, 'copy-', 'yes')
     assert call('rebuild', '--state', str(root)) == 0
 
@@ -497,11 +473,11 @@ def test_scan_outside_the_base_asks_first(tmp_path: Path) -> None:
     args = ('remove', '--state', str(root), '--scan', str(root), str(outside))
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert [question['kind'] for question in _questions(plan_path)] == ['confirm']
+    assert [question.kind for question in _questions(plan_path)] == ['confirm']
 
     _answer(plan_path, 'scan-', 'yes')
     assert call(*args) == 3
-    assert [question['kind'] for question in _questions(plan_path)] == ['confirm', 'choice']
+    assert [question.kind for question in _questions(plan_path)] == ['confirm', 'choice']
 
 
 def test_a_higher_base_records_paths_from_above_the_state(tmp_path: Path) -> None:
@@ -522,7 +498,7 @@ def test_a_higher_base_records_paths_from_above_the_state(tmp_path: Path) -> Non
     )
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert _decisions(plan_path)[0]['paths'] == ['tree/other/b.bin']
+    assert _decisions(plan_path)[0].paths == ('tree/other/b.bin',)
     _accept(plan_path)
     assert call(*args) == 0
     assert not (root / 'other' / 'b.bin').exists()
@@ -551,7 +527,7 @@ def test_a_different_base_is_answered_before_the_rebuild(tmp_path: Path) -> None
 
     plan_path = root / '.linktool' / 'plan-rebuild.json'
     assert call('rebuild', '--state', str(root)) == 3
-    assert [str(question['id']).split('-')[0] for question in _questions(plan_path)] == ['base']
+    assert [question.id.split('-')[0] for question in _questions(plan_path)] == ['base']
 
     _answer(plan_path, 'base-', 'recorded')
     assert call('rebuild', '--state', str(root)) == 0
@@ -638,12 +614,14 @@ def test_a_group_the_rules_leave_open_names_its_members(tmp_path: Path) -> None:
     assert 'realpath' not in sheet
 
 
-def test_the_gate_points_at_the_plan_that_lists_the_decisions(tmp_path: Path) -> None:
+def test_the_gate_points_at_the_decisions_in_the_sheet(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'a.bin', b'payload')
     _write(root / 'b.bin', b'payload')
 
     assert call('remove', '--scan', str(root), '--pick', 'first') == 3
     sheet = _sheet(root / '.linktool' / 'plan-remove.json').read_text(encoding='utf-8')
-    assert 'plan-remove.json 的 decisions 段' in sheet
-    assert '本文件的 decisions' not in sheet
+    assert '# 本文件的 decisions 段列出这一轮的全部决定：1 组，1 条路径会被移除或暂存' in sheet
+    assert '# decisions  这一轮的全部决定' in sheet
+    assert '#   源：a.bin（无规则可依，按路径排序取最前）' in sheet
+    assert '#   移除：b.bin' in sheet
