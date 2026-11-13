@@ -525,6 +525,8 @@ def test_a_member_outside_the_base_follows_the_tree_it_was_copied_to(tmp_path: P
     plan_path = old / 'tree' / '.linktool' / 'plan-remove.json'
     _answer(plan_path, 'scan-', 'yes')
     assert call(*args) == 3
+    sheet = (old / 'tree' / '.linktool' / 'plan-remove.toml').read_text(encoding='utf-8')
+    assert str(old / '1' / 'b.bin') in sheet
     _accept(plan_path)
     assert call(*args) == 0
     assert not (old / '1' / 'b.bin').exists()

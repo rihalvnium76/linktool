@@ -74,7 +74,8 @@ def to_rel(path: Path, root: Path) -> str:
 
 
 def from_rel(root: Path, rel: str) -> Path:
-    return root.joinpath(*rel.split('/'))
+    '''The path a recorded relative path names, with its steps above the root collapsed.'''
+    return Path(os.path.normpath(root.joinpath(*rel.split('/'))))
 
 
 def link_text(target: Path, link: Path, base_dir: Path, mode: RelMode) -> str:

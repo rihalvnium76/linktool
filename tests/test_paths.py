@@ -26,6 +26,10 @@ def test_relative_round_trip(tmp_path: Path) -> None:
     assert from_rel(tmp_path, rel) == nested / 'x.bin'
 
 
+def test_a_recorded_climb_above_the_root_resolves_to_where_it_points(tmp_path: Path) -> None:
+    assert from_rel(tmp_path / 'tree', '../1/x.bin') == tmp_path / '1' / 'x.bin'
+
+
 def test_is_within(tmp_path: Path) -> None:
     child = tmp_path / 'a' / 'b'
     child.mkdir(parents=True)
