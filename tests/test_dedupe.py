@@ -604,3 +604,24 @@ def test_status_counts_what_each_record_still_holds(
     assert '2 条待重建，分布在 1 组' in output
     assert 'other/b.bin' in output
     assert '2 条待还原' in output
+
+
+def test_status_says_an_area_it_cannot_find_is_gone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    staging = tmp_path / 'stage'
+    args = ('stage', '--scan', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
+
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-stage.json')
+    assert call(*args) == 0
+
+    staging.rename(tmp_path / 'moved-away')
+    capsys.readouterr()
+    assert call('status', '--state', str(root)) == 0
+    output = capsys.readouterr().err
+    assert f'{staging}: 暂存区缺失' in output
+    assert '不属于' not in output
