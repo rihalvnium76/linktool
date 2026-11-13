@@ -138,7 +138,7 @@ def confirm_unavailable(
         plan.short_id('unavailable', *labels),
         f'{len(labels)} 条链接的目标卷不支持符号链接，无法{verb}：\n'
         + '\n'.join(labels)
-        + f'\n这些成员会{keeping}，其余成员继续。确认吗？（yes/no）',
+        + f'\n这些成员会{keeping}。确认吗？（yes/no）',
     )
     if gate is False:
         raise errors.ToolError('跳过未获确认，本次未执行')
