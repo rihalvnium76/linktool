@@ -209,6 +209,8 @@ def _accepted(question: Question) -> str:
     if question.kind == 'confirm':
         return 'yes 或 no'
     if question.kind == 'fill':
+        if not question.candidates:
+            return '本机路径，或 skip'
         return '候选序号、本机路径，或 skip'
     values = '、'.join(candidate.value for candidate in question.candidates)
     return (

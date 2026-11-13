@@ -90,7 +90,8 @@ def _areas(store: state.StateStore, owner: Path) -> list[tuple[Path, state.Stagi
         raise state.RecordError(
             '记录里的暂存区找不到清单：\n'
             + '\n'.join(f'  {area}' for area in missing)
-            + '\n把这些目录接回原来的位置，或删掉记录里的 staging 段后重跑。'
+            + '\n把这些目录接回原来的位置后重跑；确实不再需要这些条目时，'
+            '才删掉记录里的 staging 段。'
         )
     found: list[tuple[Path, state.StagingStore]] = []
     for area in store.staging:

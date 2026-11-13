@@ -56,13 +56,13 @@ def run(config: Config, *, stage: bool) -> int:
         )
         plan.discard(plan_path)
         return EXIT_OK
-    released = _ask_for_the_plan(ask, records, decider.decisions)
+    released = _ask_for_the_plan(ask, records, decider.decisions, plan_path)
     if released is None:
         return shared.await_answers(plan_path, command, args, ask, decider.decisions)
     if not released:
         raise errors.ToolError(
             f'这份计划未获确认，磁盘上没有任何改动。'
-            f'把 {plan_path} 里 plan- 开头的题改成 yes 可重新放行。'
+            f'把 {plan.sheet(plan_path)} 里 plan- 开头的题改成 yes 再重跑，可重新放行。'
         )
 
     _apply(records, owner, base, areas)
@@ -94,8 +94,8 @@ class Decider:
         if decided is None:
             choice = self.ask.choose(
                 plan.short_id('source', identify.signature(group)),
-                f'这一组 {_describe(group)} 的源无法自动确定：符号链接的 realpath 不唯一，'
-                '偏好目录下的成员也不唯一。\n请填候选序号、候选值，或 skip 跳过该组。',
+                f'这一组 {_describe(group)} 有 {len(group.members)} 条路径，规则定不出唯一的源。\n'
+                '请填候选序号、候选值，或 skip 跳过该组。',
                 _candidates(group, self.base),
             )
             if choice is None or choice == 'skip':
@@ -190,7 +190,10 @@ def _identity_note(group: identify.Group) -> str:
 
 
 def _ask_for_the_plan(
-    ask: plan.Interrogator, records: list[state.GroupRecord], decisions: list[dict[str, object]]
+    ask: plan.Interrogator,
+    records: list[state.GroupRecord],
+    decisions: list[dict[str, object]],
+    plan_path: Path,
 ) -> bool | None:
     '''One gate for the whole plan: the rules proposed every source, the user releases them.'''
     fallback = sum(1 for item in decisions if item['reason'] == _REASONS['fallback'])
@@ -202,7 +205,7 @@ def _ask_for_the_plan(
     )
     return ask.confirm(
         plan.short_id('plan', *seed),
-        f'本文件的 decisions 段列出这一轮的全部决定：{len(records)} 组，'
+        f'{plan_path.name} 的 decisions 段列出这一轮的全部决定：{len(records)} 组，'
         f'{total} 条路径会被移除或暂存{extra}。\n'
         '确认之前磁盘上不会有任何改动。确认执行吗？（yes/no）',
     )

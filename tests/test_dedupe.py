@@ -625,3 +625,25 @@ def test_status_says_an_area_it_cannot_find_is_gone(
     output = capsys.readouterr().err
     assert f'{staging}: 暂存区缺失' in output
     assert '不属于' not in output
+
+
+def test_a_group_the_rules_leave_open_names_its_members(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'a.bin', b'payload')
+    _write(root / 'b.bin', b'payload')
+
+    assert call('remove', '--scan', str(root)) == 3
+    sheet = _sheet(root / '.linktool' / 'plan-remove.json').read_text(encoding='utf-8')
+    assert '有 2 条路径，规则定不出唯一的源' in sheet
+    assert 'realpath' not in sheet
+
+
+def test_the_gate_points_at_the_plan_that_lists_the_decisions(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'a.bin', b'payload')
+    _write(root / 'b.bin', b'payload')
+
+    assert call('remove', '--scan', str(root), '--pick', 'first') == 3
+    sheet = _sheet(root / '.linktool' / 'plan-remove.json').read_text(encoding='utf-8')
+    assert 'plan-remove.json 的 decisions 段' in sheet
+    assert '本文件的 decisions' not in sheet

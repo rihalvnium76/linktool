@@ -121,3 +121,10 @@ def test_discarding_a_plan_removes_both_files(tmp_path: Path) -> None:
     plan.discard(path)
     assert not path.exists()
     assert not plan.sheet(path).exists()
+
+
+def test_a_fill_without_candidates_accepts_a_path(tmp_path: Path) -> None:
+    ask = _interrogator()
+    ask.fill('missing-1', '请填一个本机路径作为替代源，或 skip 跳过该组。', ())
+    lines = _sheet_lines(_save(tmp_path, ask))
+    assert '# 可填：本机路径，或 skip' in lines

@@ -247,7 +247,7 @@ class StateStore:
             if version != VERSION:
                 raise RecordError(
                     f'{self.path} 的记录版本是 {version}，本版本只读版本 {VERSION}。\n'
-                    '删掉这个目录里的记录，重新跑 remove 或 stage。'
+                    f'删掉 {self.folder} 后重新跑 remove 或 stage。'
                 )
             state = jsonio.maybe_text(payload, 'state')
             base = jsonio.maybe_text(payload, 'base')
