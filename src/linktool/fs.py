@@ -135,7 +135,15 @@ def copy_file(
 
 
 def move_file(source: Path, path: Path) -> None:
-    '''Move a regular file, copying across volumes. The source goes only after the copy lands.'''
+    '''Move a regular file, renaming on one volume and copying across volumes.
+
+    A rename keeps the inode, which keeps a hardlink the source shared with another path
+    and keeps both times exactly. A copy gets a new inode, so it happens only where the
+    two volumes make a rename impossible.
+    '''
+    if os.stat(source).st_dev == os.stat(path.parent).st_dev:
+        os.replace(source, path)
+        return
     copy_file(source, path)
     os.unlink(source)
 

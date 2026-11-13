@@ -187,6 +187,31 @@ def test_stage_then_restore(tmp_path: Path) -> None:
     assert not (staging / 'files' / 'other' / 'b.bin').exists()
 
 
+def test_stage_keeps_the_inode_a_hardlink_shares(tmp_path: Path) -> None:
+    if not supports_hardlink():
+        pytest.skip('这台设备的 Python 没有 os.link')
+    root = tmp_path / 'tree'
+    staging = tmp_path / 'stage'
+    source = root / 'keep' / 'a.bin'
+    _write(source, b'payload')
+    twin = root / 'other' / 'b.bin'
+    twin.parent.mkdir(parents=True)
+    os.link(source, twin)
+
+    args = ('stage', '--scan', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-stage.json')
+    assert call(*args) == 0
+
+    held = staging / 'files' / 'other' / 'b.bin'
+    assert held.stat().st_ino == source.stat().st_ino
+    assert held.stat().st_nlink == 2
+
+    assert call('restore', '--state', str(root)) == 0
+    assert twin.stat().st_ino == source.stat().st_ino
+    assert twin.stat().st_nlink == 2
+
+
 def test_stage_holds_a_member_outside_the_base_under_its_own_digest(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     outside = tmp_path / 'outside'
