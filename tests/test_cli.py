@@ -71,11 +71,12 @@ def test_several_scan_paths_need_a_state(tmp_path: Path) -> None:
 
 
 def test_every_command_takes_only_the_settings_it_reads(tmp_path: Path) -> None:
-    assert cli.main(['status', '--state', str(tmp_path)]) == 0
     with pytest.raises(SystemExit):
-        cli.main(['status', '--state', str(tmp_path), '--scan', str(tmp_path)])
+        cli.main(['status', '--state', str(tmp_path)])
     with pytest.raises(SystemExit):
-        cli.main(['status', '--state', str(tmp_path), '--staging', str(tmp_path)])
+        cli.main(['status', str(tmp_path), '--scan', str(tmp_path)])
+    with pytest.raises(SystemExit):
+        cli.main(['restore', '--state', str(tmp_path), '--base', str(tmp_path)])
 
 
 def test_a_scan_path_is_required_where_records_are_written(tmp_path: Path) -> None:

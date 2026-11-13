@@ -1,6 +1,7 @@
 import argparse
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import cast
 
 from linktool import EXIT_ERROR, config, log
@@ -21,6 +22,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
+    if args.command == 'status':
+        return status.run(_container(args.container))
     settings = _settings(args)
     match args.command:
         case 'remove':
@@ -33,10 +36,13 @@ def _dispatch(args: argparse.Namespace) -> int:
             return restore.run(settings)
         case 'fix':
             return fix.run(settings)
-        case 'status':
-            return status.run(settings)
         case _:
             raise ToolError(f'未知命令 {args.command}')
+
+
+def _container(text: str | None) -> Path:
+    '''The one container a status run reads, defaulting to the working directory.'''
+    return Path.cwd() if text is None else Path(text).absolute()
 
 
 def _settings(args: argparse.Namespace) -> config.Config:
@@ -148,9 +154,14 @@ def _parser() -> argparse.ArgumentParser:
         parents=[_addressing(state_required=False, base=True), scanning, linking],
         help='修复因源被移动而失效的符号链接',
     )
-    commands.add_parser(
+    status_parser = commands.add_parser(
         'status',
-        parents=[_addressing(state_required=True, base=False)],
-        help='列出待重建与待还原的条目',
+        help='报出状态区或暂存区里还剩什么',
+    )
+    status_parser.add_argument(
+        'container',
+        nargs='?',
+        metavar='DIR',
+        help='状态区或暂存区的容器目录，缺省时取当前工作目录',
     )
     return parser

@@ -662,20 +662,88 @@ def test_status_counts_what_each_record_still_holds(
     staging = tmp_path / 'stage'
     args = ('stage', '--scan', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
 
-    capsys.readouterr()
-    assert call('status', '--state', str(root)) == 0
-    assert '没有待重建的条目' in capsys.readouterr().err
-
     assert call(*args) == 3
     _accept(root / '.linktool' / 'plan-stage.json')
     assert call(*args) == 0
     capsys.readouterr()
-
-    assert call('status', '--state', str(root)) == 0
+    assert call('status', str(root)) == 0
     output = capsys.readouterr().err
     assert '2 条待重建，分布在 1 组' in output
     assert str(root / 'other' / 'b.bin') in output
     assert '2 条待还原' in output
+
+    assert call('rebuild', '--state', str(root)) == 0
+    capsys.readouterr()
+    assert call('status', str(root)) == 0
+    assert '没有待重建的条目' in capsys.readouterr().err
+
+
+def test_status_reads_a_staging_area_on_its_own(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    staging = tmp_path / 'stage'
+    args = ('stage', '--scan', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
+
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-stage.json')
+    assert call(*args) == 0
+
+    capsys.readouterr()
+    assert call('status', str(staging)) == 0
+    output = capsys.readouterr().err
+    assert f'{staging}: 暂存区，属于 {root}' in output
+    assert '1 条待还原' in output
+    assert str(root / 'other' / 'b.bin') in output
+    assert '在暂存区里找不到' not in output
+
+
+def test_status_marks_a_manifest_entry_whose_file_is_gone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    staging = tmp_path / 'stage'
+    args = ('stage', '--scan', str(root), '--staging', str(staging), '--prefer', str(root / 'keep'))
+
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-stage.json')
+    assert call(*args) == 0
+
+    for path in (staging / 'files').rglob('*.bin'):
+        path.unlink()
+    target = str(root / 'other' / 'b.bin')
+    capsys.readouterr()
+    assert call('status', str(staging)) == 0
+    assert f'{target}  file  在暂存区里找不到' in capsys.readouterr().err
+
+
+def test_status_reads_the_working_directory_when_no_container_is_given(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+    args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
+
+    assert call(*args) == 3
+    _accept(root / '.linktool' / 'plan-remove.json')
+    assert call(*args) == 0
+
+    monkeypatch.chdir(root)
+    capsys.readouterr()
+    assert call('status') == 0
+    assert '1 条待重建，分布在 1 组' in capsys.readouterr().err
+
+
+def test_status_reports_a_container_without_a_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert call('status', str(tmp_path)) == 1
+    assert '里没有状态记录' in capsys.readouterr().err
 
 
 def test_status_says_an_area_it_cannot_find_is_gone(
@@ -693,7 +761,7 @@ def test_status_says_an_area_it_cannot_find_is_gone(
 
     staging.rename(tmp_path / 'moved-away')
     capsys.readouterr()
-    assert call('status', '--state', str(root)) == 0
+    assert call('status', str(root)) == 0
     output = capsys.readouterr().err
     assert f'{staging}: 暂存区缺失' in output
     assert '不属于' not in output

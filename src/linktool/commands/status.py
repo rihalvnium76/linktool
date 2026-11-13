@@ -1,42 +1,59 @@
+import os
+
 from pathlib import Path
 
 from linktool import EXIT_OK, log, state
 from linktool.commands import shared
-from linktool.config import Config
+from linktool.errors import ToolError
 from linktool.paths import plain
 
 
-def run(config: Config) -> int:
-    '''Report what each record still holds, which decides whether its folder may go.'''
-    owner = config.state
-    folder = state.workdir(owner)
-    store = state.StateStore(folder)
-    _report_pending(folder, store)
+def run(container: Path) -> int:
+    '''Report what one container still holds, which decides whether it may go.
+
+    A state directory reports the members waiting for a rebuild and each area it recorded;
+    a staging area reports the tree it belongs to and the members waiting for a restore.
+    '''
+    folder = state.workdir(container)
+    record = folder / 'state.json'
+    manifest = folder / 'staging.json'
+    if not record.exists() and not manifest.exists():
+        raise ToolError(f'{folder} 里没有状态记录：状态区要有 state.json，暂存区要有 staging.json')
+    if record.exists():
+        _report_state(container, state.StateStore(folder))
+    if manifest.exists():
+        held = state.StagingStore(folder)
+        log.note(f'{container}: 暂存区，属于 {held.owner}')
+        _report_staged(container, held)
+    return EXIT_OK
+
+
+def _report_state(container: Path, store: state.StateStore) -> None:
+    _report_pending(container, store)
     if not store.staging:
         log.note('这份记录没有暂存区')
-        return EXIT_OK
+        return
     for area in store.staging:
         if not state.workdir(area).joinpath('staging.json').exists():
             log.note(f'{area}: 暂存区缺失，清单不在这个位置')
             continue
         held = state.StagingStore(state.workdir(area))
-        if held.owner is None or plain(held.owner) != plain(owner):
-            log.note(f'{area}: 清单属于 {held.owner}，不属于 {owner}')
+        if held.owner is None or plain(held.owner) != plain(container):
+            log.note(f'{area}: 清单属于 {held.owner}，不属于 {container}')
             continue
         _report_staged(area, held)
-    return EXIT_OK
 
 
-def _report_pending(folder: Path, store: state.StateStore) -> None:
+def _report_pending(container: Path, store: state.StateStore) -> None:
     pending = store.pending()
     members = sorted(
         (member for group in pending for member in group.members if member.status == state.PENDING),
         key=lambda member: _place(store, member),
     )
     if not members:
-        log.note(f'{folder}: 没有待重建的条目')
+        log.note(f'{container}: 没有待重建的条目')
         return
-    log.note(f'{folder}: {len(members)} 条待重建，分布在 {len(pending)} 组')
+    log.note(f'{container}: {len(members)} 条待重建，分布在 {len(pending)} 组')
     for member in members:
         log.note(f'  {_place(store, member)}  {member.kind}')
 
@@ -55,4 +72,5 @@ def _report_staged(area: Path, held: state.StagingStore) -> None:
         return
     log.note(f'{area}: {len(staged)} 条待还原')
     for item in staged:
-        log.note(f'  {item.target}  {item.kind}')
+        note = '' if os.path.lexists(state.item_path(area, item)) else '  在暂存区里找不到'
+        log.note(f'  {item.target}  {item.kind}{note}')
