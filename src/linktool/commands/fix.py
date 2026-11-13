@@ -9,7 +9,7 @@ from linktool.commands import shared
 from linktool.config import Config
 from linktool.fs import Kind, create_symlink, remove_path, set_times
 from linktool.hashing import Identity
-from linktool.paths import is_within, link_text, plain
+from linktool.paths import link_text, plain
 
 
 @dataclass(slots=True)
@@ -84,44 +84,37 @@ class Finder:
 
 
 def run(config: Config) -> int:
-    root = config.required_root()
-    folder = state.workdir(root)
+    folder = state.workdir(config.state)
     plan_path = folder / 'plan-fix.json'
     args = shared.snapshot(config)
+    store = state.StateStore(folder)
     ask = plan.Interrogator(plan.answers(plan_path, 'fix', args))
 
-    scans = config.scans()
-    outside = [path for path in scans if not is_within(path, root)]
-    if outside:
-        gate = ask.confirm(
-            plan.short_id('scan', *(str(path) for path in outside)),
-            '这些扫描路径在受管树之外：\n'
-            + '\n'.join(f'  {path}' for path in outside)
-            + '\n确认扫描吗？（yes/no）',
-        )
-        if gate is None:
-            return shared.await_answers(plan_path, 'fix', args, ask)
-        if not gate:
-            raise errors.ToolError('受管树之外的扫描路径未获确认，本次未执行')
+    base = shared.effective_base(store, config, ask)
+    gate = shared.scan_gate(ask, config.scan, base if base is not None else config.base)
+    if base is None or gate is None:
+        return shared.await_answers(plan_path, 'fix', args, ask)
+    if not gate:
+        raise errors.ToolError('基准目录之外的扫描路径未获确认，本次未执行')
 
-    result = scan.collect(scans, root, [folder])
+    result = scan.collect(config.scan, [folder])
     broken = sorted(
         (
             entry
             for entry in result.entries
             if entry.kind is not Kind.FILE and not os.path.exists(entry.path)
         ),
-        key=lambda entry: entry.label,
+        key=lambda entry: plain(entry.path),
     )
     if not broken:
         log.note('没有发现失效的符号链接')
         return EXIT_OK
 
-    store = state.StateStore(folder)
     finder = Finder.build(result)
     actions: list[tuple[scan.Entry, Path]] = []
     for entry in broken:
-        found = store.find(entry.label)
+        label = shared.record_label(base, entry.path)
+        found = store.find(label)
         identity = found[0].identity if found is not None else None
         exact = finder.match_by_identity(identity)
         if len(exact) == 1:
@@ -129,8 +122,8 @@ def run(config: Config) -> int:
             continue
         candidates = exact or finder.match_by_name(entry.link_text)
         answer = ask.fill(
-            plan.short_id('fix', entry.label),
-            f'失效链接 {entry.label} 原本指向 {entry.link_text}\n'
+            plan.short_id('fix', label),
+            f'失效链接 {label} 原本指向 {entry.link_text}\n'
             f'找到 {len(candidates)} 个候选源。填候选序号、本机路径，或 skip 跳过。',
             tuple(
                 plan.Candidate(index=index, value=str(path), label=str(path))
@@ -149,8 +142,9 @@ def run(config: Config) -> int:
         return shared.await_answers(plan_path, 'fix', args, ask)
 
     for entry, source in actions:
-        text = link_text(source, entry.path, config.anchors(), config.rel_mode)
-        store.begin_relink(entry.label, text, entry.mtime_ns, entry.birth_ns)
+        text = link_text(source, entry.path, base, config.rel_mode)
+        label = shared.record_label(base, entry.path)
+        store.begin_relink(label, text, entry.mtime_ns, entry.birth_ns)
         remove_path(entry.path)
         create_symlink(text, entry.path, target_is_dir=source.is_dir())
         set_times(entry.path, entry.mtime_ns, follow=False, birth_ns=entry.birth_ns)

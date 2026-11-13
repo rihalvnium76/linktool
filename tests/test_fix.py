@@ -47,21 +47,21 @@ def test_fix_follows_the_content_recorded_in_state(
     _write(root / 'keep' / 'a.bin', b'payload')
     _write(root / 'other' / 'b.bin', b'payload')
 
-    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
     payload = json.loads(plan_path.read_text(encoding='utf-8'))
     payload['questions'][0]['answer'] = 'yes'
     plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
     assert call(*args) == 0
-    assert call('rebuild', '--root', str(root)) == 0
+    assert call('rebuild', '--state', str(root)) == 0
     link = root / 'other' / 'b.bin'
     assert link.is_symlink()
 
     (root / 'keep' / 'a.bin').rename(root / 'keep' / 'moved.bin')
     assert not link.exists()
 
-    assert call('fix', '--root', str(root)) == 0
+    assert call('fix', '--scan', str(root)) == 0
     assert link.exists()
     assert link.resolve() == (root / 'keep' / 'moved.bin').resolve()
 
@@ -72,19 +72,19 @@ def test_fix_offers_a_same_name_candidate(tmp_path: Path) -> None:
     _symlink(root / 'gone' / 'moved.bin', root / 'broken.lnk')
 
     plan_path = root / '.linktool' / 'plan-fix.json'
-    assert call('fix', '--root', str(root)) == 3
+    assert call('fix', '--scan', str(root)) == 3
     payload = json.loads(plan_path.read_text(encoding='utf-8'))
     assert payload['questions'][0]['kind'] == 'fill'
 
     _answer(plan_path, '1')
-    assert call('fix', '--root', str(root)) == 0
+    assert call('fix', '--scan', str(root)) == 0
     assert (root / 'broken.lnk').resolve() == (root / 'store' / 'moved.bin').resolve()
 
 
 def test_fix_reports_nothing_to_do(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'a.bin', b'payload')
-    assert call('fix', '--root', str(root)) == 0
+    assert call('fix', '--scan', str(root)) == 0
 
 
 def test_a_crash_mid_relink_leaves_the_path_in_the_journal(
@@ -97,7 +97,7 @@ def test_a_crash_mid_relink_leaves_the_path_in_the_journal(
     link_mtime = os.lstat(root / 'broken.lnk').st_mtime_ns
 
     plan_path = root / '.linktool' / 'plan-fix.json'
-    assert call('fix', '--root', str(root)) == 3
+    assert call('fix', '--scan', str(root)) == 3
     _answer(plan_path, '1')
 
     failing = [True]
@@ -110,7 +110,7 @@ def test_a_crash_mid_relink_leaves_the_path_in_the_journal(
 
     monkeypatch.setattr(fix, 'create_symlink', maybe_crash)
     with pytest.raises(OSError, match='模拟中断'):
-        call('fix', '--root', str(root))
+        call('fix', '--scan', str(root))
 
     assert not os.path.lexists(root / 'broken.lnk')
     last = json.loads(journal.read_text(encoding='utf-8').splitlines()[-1])
@@ -120,6 +120,6 @@ def test_a_crash_mid_relink_leaves_the_path_in_the_journal(
 
     failing[0] = False
     _symlink(root / 'gone' / 'moved.bin', root / 'broken.lnk')
-    assert call('fix', '--root', str(root)) == 0
+    assert call('fix', '--scan', str(root)) == 0
     assert (root / 'broken.lnk').resolve() == (root / 'store' / 'moved.bin').resolve()
     assert not journal.exists()

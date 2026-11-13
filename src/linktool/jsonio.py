@@ -31,6 +31,15 @@ def sequence(value: object, what: str) -> list[object]:
     return cast(list[object], value)
 
 
+def texts(value: object, what: str) -> list[str]:
+    found: list[str] = []
+    for item in sequence(value, what):
+        if not isinstance(item, str):
+            raise FormatError(f'{what} 里有不是字符串的项')
+        found.append(item)
+    return found
+
+
 def text(source: dict[str, object], key: str) -> str:
     value = source.get(key)
     if not isinstance(value, str):

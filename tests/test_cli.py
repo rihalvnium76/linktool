@@ -12,6 +12,17 @@ from linktool.commands import dedupe
 SOURCE = Path(__file__).resolve().parent.parent / 'src'
 
 
+def _capture(monkeypatch: pytest.MonkeyPatch) -> list[config.Config]:
+    seen: list[config.Config] = []
+
+    def capture(settings: config.Config, **_options: bool) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr(dedupe, 'run', capture)
+    return seen
+
+
 def test_module_entry_point_prints_the_version() -> None:
     environment = {**os.environ, 'PYTHONPATH': str(SOURCE)}
     result = subprocess.run(
@@ -27,24 +38,64 @@ def test_module_entry_point_prints_the_version() -> None:
 
 
 def test_a_list_setting_takes_several_values_in_one_flag(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    seen: list[config.Config] = []
+    for name in ('a', 'b', 'c'):
+        (tmp_path / name).mkdir()
+    monkeypatch.chdir(tmp_path)
+    seen = _capture(monkeypatch)
 
-    def capture(settings: config.Config, **_options: bool) -> int:
-        seen.append(settings)
-        return 0
+    assert cli.main(['remove', '--state', str(tmp_path), '--scan', 'a', 'b', '--scan', 'c']) == 0
 
-    monkeypatch.setattr(dedupe, 'run', capture)
-
-    assert cli.main(['remove', '--root', 'T', '--scan', 'a', 'b', '--scan', 'c']) == 0
-
-    assert seen[0].scan == (Path.cwd() / 'a', Path.cwd() / 'b', Path.cwd() / 'c')
+    assert seen[0].scan == (tmp_path / 'a', tmp_path / 'b', tmp_path / 'c')
 
 
-def test_status_reads_the_two_records_it_reports_on(tmp_path: Path) -> None:
-    assert (
-        cli.main(['status', '--root', str(tmp_path / 'T'), '--staging', str(tmp_path / 'S')]) == 0
-    )
+def test_the_one_scan_path_supplies_the_state_and_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = _capture(monkeypatch)
+
+    assert cli.main(['remove', '--scan', str(tmp_path)]) == 0
+
+    assert seen[0].state == tmp_path
+    assert seen[0].base == tmp_path
+
+
+def test_several_scan_paths_need_a_state(tmp_path: Path) -> None:
+    first = tmp_path / 'a'
+    second = tmp_path / 'b'
+    first.mkdir()
+    second.mkdir()
+
+    assert cli.main(['remove', '--scan', str(first), str(second)]) == 1
+
+
+def test_every_command_takes_only_the_settings_it_reads(tmp_path: Path) -> None:
+    assert cli.main(['status', '--state', str(tmp_path)]) == 0
     with pytest.raises(SystemExit):
-        cli.main(['status', '--root', str(tmp_path / 'T'), '--scan', 'a'])
+        cli.main(['status', '--state', str(tmp_path), '--scan', str(tmp_path)])
+    with pytest.raises(SystemExit):
+        cli.main(['status', '--state', str(tmp_path), '--staging', str(tmp_path)])
+
+
+def test_a_scan_path_is_required_where_records_are_written(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(['remove', '--state', str(tmp_path)])
+    with pytest.raises(SystemExit):
+        cli.main(['stage', '--scan', str(tmp_path)])
+
+
+def test_a_staging_area_may_not_sit_inside_a_scan_path(tmp_path: Path) -> None:
+    assert cli.main(['stage', '--scan', str(tmp_path), '--staging', str(tmp_path / 's')]) == 1
+
+
+def test_relative_paths_follow_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / 'tree').mkdir()
+    monkeypatch.chdir(tmp_path)
+    seen = _capture(monkeypatch)
+
+    assert cli.main(['remove', '--scan', 'tree']) == 0
+
+    assert seen[0].state == tmp_path / 'tree'

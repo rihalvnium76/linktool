@@ -1,158 +1,178 @@
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from linktool import EXIT_OK, errors, identify, log, plan, scan, state
 from linktool.commands import shared
-from linktool.config import Config, ConfigError
-from linktool.fs import Kind, Prober, existing_ancestor, move_file, move_link, remove_path
+from linktool.config import Config, ConfigError, Pick
+from linktool.fs import (
+    Kind,
+    Prober,
+    existing_ancestor,
+    move_file,
+    move_link,
+    remove_path,
+)
 from linktool.paths import is_within, plain, to_rel
 
 
 def run(config: Config, *, stage: bool) -> int:
-    root = config.required_root()
-    folder = state.workdir(root)
     command = 'stage' if stage else 'remove'
+    owner = config.state
+    folder = state.workdir(owner)
     plan_path = folder / f'plan-{command}.json'
     args = shared.snapshot(config)
-    staging = config.required_staging() if stage else None
-    if staging is not None:
-        if is_within(staging, root):
-            raise ConfigError('暂存区不能位于受管树内，否则它会被复制工具一起搬走')
-        try:
-            staging.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            raise ConfigError(f'无法建立暂存区 {staging}: {error.strerror}') from error
+    areas = config.required_stagings() if stage else ()
+    _require_owners(areas, owner)
 
+    store = state.StateStore(folder)
     ask = plan.Interrogator(plan.answers(plan_path, command, args))
+    base = shared.effective_base(store, config, ask)
+    gate = shared.scan_gate(ask, config.scan, base if base is not None else config.base)
+    if base is None or gate is None:
+        return shared.await_answers(plan_path, command, args, ask)
+    if not gate:
+        raise ConfigError('基准目录之外的扫描路径未获确认，本次未执行')
+    _create(areas)
 
-    scans = config.scans()
-    outside = [path for path in scans if not is_within(path, root)]
-    if outside:
-        gate = ask.confirm(
-            plan.short_id('scan', *(str(path) for path in outside)),
-            '这些扫描路径在受管树之外：\n'
-            + '\n'.join(f'  {path}' for path in outside)
-            + '\n它们会被登记进状态文件。确认扫描吗？（yes/no）',
-        )
-        if gate is None:
-            return shared.await_answers(plan_path, command, args, ask)
-        if not gate:
-            raise ConfigError('受管树之外的扫描路径未获确认，本次未执行')
-
-    exclude = [folder]
-    if staging is not None:
-        exclude.append(staging)
-    groups = identify.build(scan.collect(scans, root, exclude).entries)
+    groups = identify.build(scan.collect(config.scan, [folder, *areas]).entries)
     groups.sort(key=lambda group: group.key)
 
-    decisions: list[dict[str, object]] = []
-    blocked: list[str] = []
-    prober = Prober()
-    records = [
-        record
-        for group in groups
-        if (record := _decide(group, root, config, ask, decisions, blocked, staging, prober))
-        is not None
-    ]
-    if blocked:
-        shared.confirm_unavailable(ask, blocked, verb='暂存', keeping='留在受管树里')
+    decider = Decider(
+        ask=ask, owner=owner, base=base, areas=areas, prefer=config.prefer, pick=config.pick
+    )
+    records = [record for group in groups if (record := decider.decide(group)) is not None]
+    if decider.blocked:
+        shared.confirm_unavailable(ask, decider.blocked, verb='暂存', keeping='留在原处')
     if ask.questions:
-        return shared.await_answers(plan_path, command, args, ask, decisions)
+        return shared.await_answers(plan_path, command, args, ask, decider.decisions)
     if not records:
         log.note(
             '没有可处理的重复文件或链接'
-            + (f'，跳过 {len(blocked)} 条目标卷不支持符号链接的链接' if blocked else '')
+            + (
+                f'，跳过 {len(decider.blocked)} 条目标卷不支持符号链接的链接'
+                if decider.blocked
+                else ''
+            )
         )
         plan.discard(plan_path)
         return EXIT_OK
-    released = _ask_for_the_plan(ask, records, decisions)
+    released = _ask_for_the_plan(ask, records, decider.decisions)
     if released is None:
-        return shared.await_answers(plan_path, command, args, ask, decisions)
+        return shared.await_answers(plan_path, command, args, ask, decider.decisions)
     if not released:
         raise errors.ToolError(
             f'这份计划未获确认，磁盘上没有任何改动。'
             f'把 {plan_path} 里 plan- 开头的题改成 yes 可重新放行。'
         )
 
-    _apply(records, root, folder, staging)
+    _apply(records, owner, base, areas)
     plan.discard(plan_path)
     total = sum(len(record.members) for record in records)
     log.note(f'{"已暂存" if stage else "已移除"} {total} 条路径，共 {len(records)} 组')
     return EXIT_OK
 
 
-def _decide(
-    group: identify.Group,
-    root: Path,
-    config: Config,
-    ask: plan.Interrogator,
-    decisions: list[dict[str, object]],
-    blocked: list[str],
-    staging: Path | None,
-    prober: Prober,
-) -> state.GroupRecord | None:
-    source = identify.auto_source(group, config.prefer, config.pick)
-    reason = source.reason if source is not None else ''
-    decided = source.path if source is not None else None
-    answered = False
-    if decided is None:
-        choice = ask.choose(
-            plan.short_id('source', identify.signature(group)),
-            f'这一组 {_describe(group)} 的源无法自动确定：符号链接的 realpath 不唯一，'
-            '偏好目录下的成员也不唯一。\n请填候选序号、候选值，或 skip 跳过该组。',
-            _candidates(group),
+@dataclass(slots=True)
+class Decider:
+    '''What every group of one run is decided against.'''
+
+    ask: plan.Interrogator
+    owner: Path
+    base: Path
+    areas: tuple[Path, ...]
+    prefer: tuple[Path, ...]
+    pick: Pick
+    prober: Prober = field(default_factory=Prober)
+    decisions: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
+    blocked: list[str] = field(default_factory=list[str])
+
+    def decide(self, group: identify.Group) -> state.GroupRecord | None:
+        source = identify.auto_source(group, self.prefer, self.pick)
+        reason = source.reason if source is not None else ''
+        decided = source.path if source is not None else None
+        answered = False
+        if decided is None:
+            choice = self.ask.choose(
+                plan.short_id('source', identify.signature(group)),
+                f'这一组 {_describe(group)} 的源无法自动确定：符号链接的 realpath 不唯一，'
+                '偏好目录下的成员也不唯一。\n请填候选序号、候选值，或 skip 跳过该组。',
+                _candidates(group, self.base),
+            )
+            if choice is None or choice == 'skip':
+                return None
+            decided = identify.resolve(group, Path(choice))
+            reason = 'yours'
+            answered = True
+
+        if not is_within(decided, self.base) and not answered:
+            gate = self.ask.confirm(
+                plan.short_id('outside', identify.signature(group)),
+                f'这一组的源在基准目录之外：{decided}\n'
+                '它在记录里会写成绝对路径，换一份记录或换一台机器后可能指向不存在的位置。'
+                '确认以它作为源吗？（yes/no）',
+            )
+            if gate is None or not gate:
+                return None
+
+        rest = [item for item in group.members if plain(item.entry.path) != plain(decided)]
+        if not rest:
+            return None
+        record = self._record(group, decided, rest)
+        if self.areas:
+            record = self._without_unstaged(record)
+            if record is None:
+                return None
+        self.decisions.append(
+            {
+                'source': record.source.label if record.source is not None else '',
+                'reason': _REASONS[reason],
+                'identity': _identity_note(group),
+                'paths': [member.label for member in record.members],
+            }
         )
-        if choice is None or choice == 'skip':
-            return None
-        decided = identify.resolve(group, Path(choice))
-        reason = 'yours'
-        answered = True
-
-    if not is_within(decided, root) and not answered:
-        gate = ask.confirm(
-            plan.short_id('outside', identify.signature(group)),
-            f'这一组的源在受管树之外：{decided}\n'
-            '目标机上这个路径可能不存在，重建出的链接会在那里失效。确认以它作为源吗？（yes/no）',
-        )
-        if gate is None or not gate:
-            return None
-
-    members = [member for member in group.members if plain(member.entry.path) != plain(decided)]
-    if not members:
-        return None
-    record = _record(root, group, decided, members)
-    if staging is not None:
-        record = _without_unstaged(record, staging, prober, blocked)
-        if record is None:
-            return None
-    decisions.append(
-        {
-            'source': record.source_rel or record.source_abs,
-            'reason': _REASONS[reason],
-            'identity': _identity_note(group),
-            'paths': [member.label for member in record.members],
-        }
-    )
-    return record
-
-
-def _without_unstaged(
-    record: state.GroupRecord, staging: Path, prober: Prober, blocked: list[str]
-) -> state.GroupRecord | None:
-    '''Drop the links the staging volume cannot hold, naming them for one confirmation.'''
-    refused = {
-        member.label
-        for member in record.members
-        if member.kind is not Kind.FILE
-        and not prober.capabilities(
-            existing_ancestor(shared.staged_path(staging, member).parent)
-        ).symlink
-    }
-    if not refused:
         return record
-    blocked.extend(sorted(refused))
-    kept = [member for member in record.members if member.label not in refused]
-    return replace(record, members=kept) if kept else None
+
+    def _without_unstaged(self, record: state.GroupRecord) -> state.GroupRecord | None:
+        '''Drop the links the staging volume cannot hold, naming them for one confirmation.'''
+        refused = {
+            member.label
+            for member in record.members
+            if member.kind is not Kind.FILE
+            and not self.prober.capabilities(
+                existing_ancestor(
+                    shared.staged_path(self.owner, self.base, self.areas, member).parent
+                )
+            ).symlink
+        }
+        if not refused:
+            return record
+        self.blocked.extend(sorted(refused))
+        kept = [member for member in record.members if member.label not in refused]
+        return replace(record, members=kept) if kept else None
+
+    def _record(
+        self, group: identify.Group, source: Path, members: list[identify.Participant]
+    ) -> state.GroupRecord:
+        ordered = sorted(members, key=lambda item: plain(item.entry.path))
+        return state.GroupRecord(
+            key=group.key,
+            identity=group.identity,
+            dir_target=str(group.dir_target) if group.dir_target is not None else None,
+            source=shared.marker(self.base, source),
+            members=[self._member(item) for item in ordered],
+        )
+
+    def _member(self, member: identify.Participant) -> state.MemberRecord:
+        rel, absolute = shared.record_place(self.base, member.entry.path)
+        return state.MemberRecord(
+            rel=rel,
+            abs=absolute,
+            kind=member.entry.kind,
+            mtime_ns=member.entry.mtime_ns,
+            birth_ns=member.entry.birth_ns,
+            target_is_dir=member.entry.target_is_dir,
+            status=state.PENDING,
+        )
 
 
 _REASONS = {
@@ -176,7 +196,10 @@ def _ask_for_the_plan(
     fallback = sum(1 for item in decisions if item['reason'] == _REASONS['fallback'])
     total = sum(len(record.members) for record in records)
     extra = f'，其中 {fallback} 组由排序兜底选定' if fallback else ''
-    seed = (f'{record.key}|{record.source_rel or record.source_abs}' for record in records)
+    seed = (
+        f'{record.key}|{record.source.label if record.source is not None else ""}'
+        for record in records
+    )
     return ask.confirm(
         plan.short_id('plan', *seed),
         f'本文件的 decisions 段列出这一轮的全部决定：{len(records)} 组，'
@@ -191,84 +214,97 @@ def _describe(group: identify.Group) -> str:
     return '（目录链接）'
 
 
-def _candidates(group: identify.Group) -> list[plan.Candidate]:
-    ordered = sorted(group.members, key=lambda member: member.entry.label)
+def _candidates(group: identify.Group, base: Path) -> list[plan.Candidate]:
+    ordered = sorted(group.members, key=lambda member: plain(member.entry.path))
     return [
-        plan.Candidate(index=index, value=str(member.entry.path), label=_label(member))
+        plan.Candidate(index=index, value=str(member.entry.path), label=_label(member, base))
         for index, member in enumerate(ordered, start=1)
     ]
 
 
-def _label(member: identify.Participant) -> str:
+def _label(member: identify.Participant, base: Path) -> str:
+    name = shared.record_label(base, member.entry.path)
     if member.entry.kind is Kind.FILE:
-        return member.entry.label
-    return f'{member.entry.label}  ->  {member.real}'
+        return name
+    return f'{name}  ->  {member.real}'
 
 
-def _record(
-    root: Path, group: identify.Group, source: Path, members: list[identify.Participant]
-) -> state.GroupRecord:
-    source_rel = None
-    source_abs = None
-    if is_within(source, root):
-        source_rel = to_rel(source, root)
-    else:
-        source_abs = str(source)
-    return state.GroupRecord(
-        key=group.key,
-        identity=group.identity,
-        dir_target=str(group.dir_target) if group.dir_target is not None else None,
-        source_rel=source_rel,
-        source_abs=source_abs,
-        members=[
-            state.MemberRecord(
-                rel=member.entry.rel,
-                abs=None if member.entry.rel is not None else str(member.entry.path),
-                kind=member.entry.kind,
-                mtime_ns=member.entry.mtime_ns,
-                birth_ns=member.entry.birth_ns,
-                target_is_dir=member.entry.target_is_dir,
-                status=state.PENDING,
+def _require_owners(areas: tuple[Path, ...], owner: Path) -> None:
+    '''One staging area holds the entries of one tree, so a shared area cannot mix them.'''
+    for area in areas:
+        held = state.StagingStore(state.workdir(area))
+        if held.owner is not None and plain(held.owner) != plain(owner):
+            raise ConfigError(
+                f'暂存区 {area} 属于 {held.owner}，不能同时服务 {owner}。\n'
+                '换一个暂存区，或把这个暂存区里的条目还原干净后删掉它的 .linktool 目录。'
             )
-            for member in sorted(members, key=lambda participant: participant.entry.label)
-        ],
-    )
+
+
+def _create(areas: tuple[Path, ...]) -> None:
+    for area in areas:
+        try:
+            area.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise ConfigError(f'无法建立暂存区 {area}: {error.strerror}') from error
 
 
 def _apply(
-    records: list[state.GroupRecord], root: Path, folder: Path, staging: Path | None
+    records: list[state.GroupRecord], owner: Path, base: Path, areas: tuple[Path, ...]
 ) -> None:
-    store = state.StateStore(folder)
-    store.add(records)
-    staging_store: state.StagingStore | None = None
-    if staging is not None:
-        staging_store = state.StagingStore(state.workdir(staging))
-        staging_store.root = root
-        staging_store.add(
-            state.MemberRecord(
-                rel=member.rel,
-                abs=member.abs,
-                kind=member.kind,
-                mtime_ns=member.mtime_ns,
-                birth_ns=member.birth_ns,
-                target_is_dir=member.target_is_dir,
-                status=state.STAGED,
-            )
-            for record in records
-            for member in record.members
-        )
+    store = state.StateStore(state.workdir(owner))
+    store.state = owner
+    store.base = base
+    if not areas:
+        store.add(records)
+        for record in records:
+            for member in record.members:
+                remove_path(shared.member_path(base, member))
+        return
 
+    held, used = _hold(records, owner, base, areas)
+    store.add(records, used)
     for record in records:
         for member in record.members:
-            path = shared.member_path(root, member)
-            if staging is None:
-                remove_path(path)
-                continue
-            destination = shared.staged_path(staging, member)
+            path = shared.member_path(base, member)
+            destination = shared.staged_path(owner, base, areas, member)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if member.kind is Kind.FILE:
                 move_file(path, destination)
             else:
                 move_link(path, destination)
-    if staging_store is not None:
-        staging_store.flush()
+    for item in held:
+        item.flush()
+
+
+def _hold(
+    records: list[state.GroupRecord], owner: Path, base: Path, areas: tuple[Path, ...]
+) -> tuple[list[state.StagingStore], list[Path]]:
+    '''Write the manifest of every area that takes a member, before any member moves.'''
+    found: dict[str, list[state.StagedItem]] = {plain(area): [] for area in areas}
+    for record in records:
+        for member in record.members:
+            target = shared.member_path(base, member)
+            area = shared.staging_area(areas, target)
+            found[plain(area)].append(
+                state.StagedItem(
+                    target=str(target),
+                    staged=to_rel(state.staged_location(owner, area, target), area),
+                    kind=member.kind,
+                    mtime_ns=member.mtime_ns,
+                    birth_ns=member.birth_ns,
+                    target_is_dir=member.target_is_dir,
+                    status=state.STAGED,
+                )
+            )
+    stores: list[state.StagingStore] = []
+    used: list[Path] = []
+    for area in areas:
+        items = found[plain(area)]
+        if not items:
+            continue
+        store = state.StagingStore(state.workdir(area))
+        store.owner = owner
+        store.add(items)
+        stores.append(store)
+        used.append(area)
+    return stores, used

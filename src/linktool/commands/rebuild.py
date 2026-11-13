@@ -17,7 +17,7 @@ from linktool.fs import (
     remove_path,
     set_times,
 )
-from linktool.paths import is_within, link_text, plain
+from linktool.paths import RelMode, is_within, link_text, plain
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +31,7 @@ class Action:
 
 
 def run(config: Config) -> int:
-    root = config.required_root()
-    folder = state.workdir(root)
+    folder = state.workdir(config.state)
     plan_path = folder / 'plan-rebuild.json'
     args = shared.snapshot(config)
     store = state.StateStore(folder)
@@ -42,11 +41,15 @@ def run(config: Config) -> int:
         return EXIT_OK
 
     ask = plan.Interrogator(plan.answers(plan_path, 'rebuild', args))
+    base = shared.effective_base(store, config, ask)
+    if base is None:
+        return shared.await_answers(plan_path, 'rebuild', args, ask)
+
     prober = Prober()
     actions: list[Action] = []
     blocked: list[str] = []
     for group in pending:
-        planned, refused = _plan_group(group, root, config, ask, prober)
+        planned, refused = _plan_group(group, base, ask, prober)
         actions.extend(planned)
         blocked.extend(refused)
 
@@ -71,7 +74,7 @@ def run(config: Config) -> int:
         plan.discard(plan_path)
         return EXIT_OK
 
-    created = _apply(actions, config, store)
+    created = _apply(actions, base, config.rel_mode, store)
     store.flush()
     plan.discard(plan_path)
     log.note(f'已重建 {created} 条路径')
@@ -79,17 +82,17 @@ def run(config: Config) -> int:
 
 
 def _plan_group(
-    group: state.GroupRecord, root: Path, config: Config, ask: plan.Interrogator, prober: Prober
+    group: state.GroupRecord, base: Path, ask: plan.Interrogator, prober: Prober
 ) -> tuple[list[Action], list[str]]:
     '''Plan one group's rebuilds, and name the members whose volume refuses links.'''
     members = [member for member in group.members if member.status == state.PENDING]
     if not members:
         return [], []
-    source = shared.source_path(root, group)
+    source = shared.source_path(base, group)
     if source is None or not source.exists():
         answer = ask.fill(
             plan.short_id('missing', group.key),
-            f'这一组的源已不存在：{group.source_rel or group.source_abs}\n'
+            f'这一组的源已不存在：{group.source.label if group.source is not None else ""}\n'
             f'待重建 {len(members)} 条路径。请填一个本机路径作为替代源，或 skip 跳过该组。',
             (),
         )
@@ -100,10 +103,10 @@ def _plan_group(
             log.warn(f'替代源不存在：{source}')
             return [], []
 
-    if not is_within(source, root):
+    if not is_within(source, base):
         gate = ask.confirm(
             plan.short_id('outside', group.key),
-            f'重建的源在受管树之外：{source}\n确认以它作为源吗？（yes/no）',
+            f'重建的源在基准目录之外：{source}\n确认以它作为源吗？（yes/no）',
         )
         if gate is None or not gate:
             return [], []
@@ -111,7 +114,7 @@ def _plan_group(
     actions: list[Action] = []
     blocked: list[str] = []
     for member in members:
-        target = shared.member_path(root, member)
+        target = shared.member_path(base, member)
         present = os.path.lexists(target)
         if present and _satisfied(target, source, group):
             actions.append(Action(group, member, source, target, None))
@@ -186,7 +189,7 @@ def _size(source: Path) -> int:
         return 0
 
 
-def _apply(actions: list[Action], config: Config, store: state.StateStore) -> int:
+def _apply(actions: list[Action], base: Path, rel_mode: RelMode, store: state.StateStore) -> int:
     created = 0
     for action in actions:
         member = action.member
@@ -200,7 +203,7 @@ def _apply(actions: list[Action], config: Config, store: state.StateStore) -> in
             case Built.HARDLINK:
                 create_hardlink(action.source, action.target)
             case Built.SYMLINK:
-                text = link_text(action.source, action.target, config.anchors(), config.rel_mode)
+                text = link_text(action.source, action.target, base, rel_mode)
                 create_symlink(text, action.target, target_is_dir=_is_dir(action))
                 set_times(action.target, member.mtime_ns, follow=False, birth_ns=member.birth_ns)
             case Built.COPY:

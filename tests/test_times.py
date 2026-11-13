@@ -62,14 +62,14 @@ def _capabilities(**flags: bool) -> object:
 
 def _remove_and_rebuild(root: Path, monkeypatch: pytest.MonkeyPatch, **flags: bool) -> Path:
     monkeypatch.setattr(Prober, 'capabilities', _capabilities(**flags))
-    args = ('remove', '--root', str(root), '--prefer', str(root / 'keep'))
+    args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
     assert call(*args) == 3
     _answer_all(root / '.linktool' / 'plan-remove.json', 'yes')
     assert call(*args) == 0
 
-    if call('rebuild', '--root', str(root)) == 3:
+    if call('rebuild', '--state', str(root)) == 3:
         _answer_all(root / '.linktool' / 'plan-rebuild.json', 'yes')
-        assert call('rebuild', '--root', str(root)) == 0
+        assert call('rebuild', '--state', str(root)) == 0
     return root / 'other' / 'b.bin'
 
 
@@ -106,7 +106,7 @@ def test_stage_then_restore_keeps_a_files_times(tmp_path: Path) -> None:
     _stage(root, staging)
     _assert_stamped(staging / 'files' / 'other' / 'b.bin', kind=Kind.FILE)
 
-    assert call('restore', '--staging', str(staging), '--root', str(root)) == 0
+    assert call('restore', '--state', str(root)) == 0
     _assert_stamped(root / 'other' / 'b.bin', kind=Kind.FILE)
 
 
@@ -119,14 +119,14 @@ def test_stage_then_restore_keeps_a_links_times(tmp_path: Path) -> None:
     _stage(root, staging)
     _assert_stamped(staging / 'files' / LINK_NAME, kind=Kind.SYMLINK)
 
-    assert call('restore', '--staging', str(staging), '--root', str(root)) == 0
+    assert call('restore', '--state', str(root)) == 0
     _assert_stamped(root / LINK_NAME, kind=Kind.SYMLINK)
 
 
 def _stage(root: Path, staging: Path) -> None:
     args = (
         'stage',
-        '--root',
+        '--scan',
         str(root),
         '--staging',
         str(staging),

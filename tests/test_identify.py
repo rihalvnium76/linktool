@@ -10,7 +10,11 @@ from linktool.fs import supports_hardlink
 
 
 def _entries(root: Path) -> list[scan.Entry]:
-    return scan.collect([root], root, []).entries
+    return scan.collect([root], []).entries
+
+
+def _name(path: Path) -> str:
+    return path.name
 
 
 def _source(group: identify.Group, prefer: tuple[Path, ...], pick: Pick = Pick.ASK) -> Path | None:
@@ -42,7 +46,7 @@ def test_same_content_forms_one_group(tmp_path: Path) -> None:
     _write(tmp_path / 'b.bin', b'payload', 2)
     groups = identify.build(_entries(tmp_path))
     assert len(groups) == 1
-    assert sorted(member.entry.label for member in groups[0].members) == ['a.bin', 'b.bin']
+    assert sorted(_name(member.entry.path) for member in groups[0].members) == ['a.bin', 'b.bin']
 
 
 def test_different_content_stays_apart(tmp_path: Path) -> None:
@@ -56,7 +60,7 @@ def test_symlink_joins_the_group_of_its_target(tmp_path: Path) -> None:
     _symlink(tmp_path / 'a.bin', tmp_path / 'link.bin')
     groups = identify.build(_entries(tmp_path))
     assert len(groups) == 1
-    assert sorted(member.entry.label for member in groups[0].members) == ['a.bin', 'link.bin']
+    assert sorted(_name(member.entry.path) for member in groups[0].members) == ['a.bin', 'link.bin']
 
 
 def test_hardlinks_form_one_group(tmp_path: Path) -> None:
@@ -84,7 +88,7 @@ def test_hardlinks_read_their_content_once(tmp_path: Path, monkeypatch: pytest.M
     groups = identify.build(_entries(tmp_path))
     assert len(calls) == 2
     assert len(groups) == 1
-    assert sorted(member.entry.label for member in groups[0].members) == [
+    assert sorted(_name(member.entry.path) for member in groups[0].members) == [
         'a.bin',
         'b.bin',
         'c.bin',

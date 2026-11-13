@@ -7,7 +7,7 @@ from pathlib import Path
 
 from linktool import log
 from linktool.fs import Kind, birth_time, link_is_dir
-from linktool.paths import is_within, plain, read_link, to_rel
+from linktool.paths import is_within, plain, read_link
 
 SKIP_NAME = '.linktool'
 
@@ -15,16 +15,11 @@ SKIP_NAME = '.linktool'
 @dataclass(frozen=True, slots=True)
 class Entry:
     path: Path
-    rel: str | None
     kind: Kind
     mtime_ns: int
     birth_ns: int | None
     link_text: str | None
     target_is_dir: bool | None
-
-    @property
-    def label(self) -> str:
-        return self.rel if self.rel is not None else str(self.path)
 
 
 @dataclass(slots=True)
@@ -33,7 +28,7 @@ class ScanResult:
     dirs: list[Path] = field(default_factory=list[Path])
 
 
-def collect(roots: Sequence[Path], root: Path | None, exclude: Sequence[Path]) -> ScanResult:
+def collect(roots: Sequence[Path], exclude: Sequence[Path]) -> ScanResult:
     '''Walk every root, yielding files and links. Directories are traversed, links are not.'''
     found = ScanResult()
     seen: set[str] = set()
@@ -52,10 +47,10 @@ def collect(roots: Sequence[Path], root: Path | None, exclude: Sequence[Path]) -
             log.warn(f'跳过无法读取的路径 {path}: {error.strerror}')
             continue
         if stat.S_ISLNK(info.st_mode):
-            found.entries.append(_entry(path, root, Kind.SYMLINK, info))
+            found.entries.append(_entry(path, Kind.SYMLINK, info))
             continue
         if os.path.isjunction(path):
-            found.entries.append(_entry(path, root, Kind.JUNCTION, info))
+            found.entries.append(_entry(path, Kind.JUNCTION, info))
             continue
         if stat.S_ISDIR(info.st_mode):
             if path.name == SKIP_NAME:
@@ -68,15 +63,14 @@ def collect(roots: Sequence[Path], root: Path | None, exclude: Sequence[Path]) -
                 log.warn(f'跳过无法列出的目录 {path}: {error.strerror}')
             continue
         if stat.S_ISREG(info.st_mode):
-            found.entries.append(_entry(path, root, Kind.FILE, info))
+            found.entries.append(_entry(path, Kind.FILE, info))
     return found
 
 
-def _entry(path: Path, root: Path | None, kind: Kind, info: os.stat_result) -> Entry:
+def _entry(path: Path, kind: Kind, info: os.stat_result) -> Entry:
     is_link = kind is not Kind.FILE
     return Entry(
         path=path,
-        rel=to_rel(path, root) if root is not None and is_within(path, root) else None,
         kind=kind,
         mtime_ns=info.st_mtime_ns,
         birth_ns=birth_time(info),

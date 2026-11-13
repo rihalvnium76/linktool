@@ -185,7 +185,7 @@ def auto_source(group: Group, prefer: Sequence[Path], pick: Pick) -> Source | No
     if preferred is not None:
         return Source(preferred, 'prefer')
     if pick is Pick.FIRST:
-        first = min(group.members, key=lambda member: member.entry.label)
+        first = min(group.members, key=lambda member: plain(member.entry.path))
         return Source(first.real, 'fallback')
     return None
 
@@ -196,7 +196,7 @@ def _single_object(members: Sequence[Participant]) -> Path | None:
         return None
     if len({_object_key(member) for member in members}) != 1:
         return None
-    first = min(members, key=lambda member: member.entry.label)
+    first = min(members, key=lambda member: plain(member.entry.path))
     return first.real
 
 
@@ -229,4 +229,4 @@ def resolve(group: Group, path: Path) -> Path:
 
 def signature(group: Group) -> str:
     '''A stable label for the group, used to key its questions across runs.'''
-    return '|'.join(sorted(member.entry.label for member in group.members))
+    return '|'.join(sorted(plain(member.entry.path) for member in group.members))
