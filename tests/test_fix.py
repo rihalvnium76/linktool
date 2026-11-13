@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from pathlib import Path
 
@@ -29,10 +30,19 @@ def _symlink(source: Path, target: Path, *, is_dir: bool = False) -> None:
         pytest.skip(f'本机不能创建符号链接：{error}')
 
 
+def _sheet(plan_path: Path) -> Path:
+    return plan_path.with_suffix('.toml')
+
+
 def _answer(plan_path: Path, value: str) -> None:
-    payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    payload['questions'][0]['answer'] = value
-    plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    sheet = _sheet(plan_path)
+    lines = sheet.read_text(encoding='utf-8').splitlines()
+    for index, line in enumerate(lines):
+        found = re.match(r"^'([^']+)' = ", line)
+        if found is not None:
+            lines[index] = f"'{found.group(1)}' = '{value}'"
+            break
+    sheet.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 def _no_links(self: Prober, folder: Path) -> Capabilities:
@@ -50,9 +60,7 @@ def test_fix_follows_the_content_recorded_in_state(
     args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    payload = json.loads(plan_path.read_text(encoding='utf-8'))
-    payload['questions'][0]['answer'] = 'yes'
-    plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    _answer(plan_path, 'yes')
     assert call(*args) == 0
     assert call('rebuild', '--state', str(root)) == 0
     link = root / 'other' / 'b.bin'

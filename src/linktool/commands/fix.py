@@ -138,7 +138,7 @@ def run(config: Config) -> int:
             continue
         actions.append((entry, source))
 
-    if ask.questions:
+    if ask.pending:
         return shared.await_answers(plan_path, 'fix', args, ask)
 
     for entry, source in actions:

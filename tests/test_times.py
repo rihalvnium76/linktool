@@ -1,9 +1,8 @@
-import json
 import os
+import re
 import sys
 
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -45,12 +44,22 @@ def _assert_stamped(
         assert birth_time(info) == birth_ns
 
 
+def _sheet(plan_path: Path) -> Path:
+    return plan_path.with_suffix('.toml')
+
+
+def _fill_all(lines: list[str], value: str) -> None:
+    for index, line in enumerate(lines):
+        found = re.match(r"^'([^']+)' = ", line)
+        if found is not None:
+            lines[index] = f"'{found.group(1)}' = '{value}'"
+
+
 def _answer_all(plan_path: Path, value: str) -> None:
-    payload = cast(dict[str, object], json.loads(plan_path.read_text(encoding='utf-8')))
-    questions = cast(list[dict[str, object]], payload['questions'])
-    for question in questions:
-        question['answer'] = value
-    plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    sheet = _sheet(plan_path)
+    lines = sheet.read_text(encoding='utf-8').splitlines()
+    _fill_all(lines, value)
+    sheet.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 def _capabilities(**flags: bool) -> object:

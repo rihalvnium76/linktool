@@ -1,4 +1,5 @@
 import hashlib
+import tomllib
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -7,15 +8,13 @@ from pathlib import Path
 from linktool import jsonio
 from linktool.errors import ToolError
 
+VERSION = 2
 INTRO = (
-    '本文件由 linktool 生成。decisions 段是这一轮由规则定下的全部决定，'
-    'questions 段是工具无法自行决定、或需要用户放行的项。\n'
-    '在每一题的 answer 字段填入答案，然后重新运行同一条命令；'
-    '命令行参数必须与生成本文件时一致。\n'
-    'answers 段记着已经答过、本轮还在沿用的答案。\n'
+    '每个带引号的行是一道题的答案，填好后重跑同一条命令。空着的题会让命令停在这一轮。\n'
     'confirm 题填 yes 或 no；choice 题填候选序号、候选值或 skip；'
     'fill 题填候选序号、路径或 skip。\n'
-    '工具不会猜用户的意思：填了无效答案会在这里标出原因，等用户重填。'
+    '值用单引号括起，反斜杠原样保留；值里有单引号时改用双引号并把反斜杠写成 \\\\。\n'
+    '填了无效值时工具在这道题上方标出原因，等重填。'
 )
 
 
@@ -30,14 +29,17 @@ class Candidate:
     label: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Question:
+    '''One question this run reached, with the answer it settled or the one it waits for.'''
+
     id: str
     kind: str
     prompt: str
     candidates: tuple[Candidate, ...]
     answer: str | None
-    error: str | None
+    settled: bool
+    error: str | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -48,7 +50,6 @@ class Question:
                 {'index': item.index, 'value': item.value, 'label': item.label}
                 for item in self.candidates
             ],
-            'answer': self.answer,
             'error': self.error,
         }
 
@@ -58,17 +59,16 @@ class Interrogator:
 
     def __init__(self, previous: Mapping[str, str]) -> None:
         self._previous = previous
-        self._questions: list[Question] = []
-        self._settled: dict[str, str] = {}
+        self._asked: list[Question] = []
 
     @property
-    def questions(self) -> tuple[Question, ...]:
-        return tuple(self._questions)
+    def reached(self) -> tuple[Question, ...]:
+        '''Every question this run reached, answered or not, in the order it reached them.'''
+        return tuple(self._asked)
 
     @property
-    def settled(self) -> dict[str, str]:
-        '''Answers this run reused, so the next run still sees them in the file.'''
-        return dict(self._settled)
+    def pending(self) -> tuple[Question, ...]:
+        return tuple(question for question in self._asked if not question.settled)
 
     def confirm(self, qid: str, prompt: str) -> bool | None:
         answer = self._ask(qid, 'confirm', prompt, (), _confirm)
@@ -91,23 +91,26 @@ class Interrogator:
         validate: Callable[[str], str | None],
     ) -> str | None:
         raw = self._previous.get(qid)
-        error = None
         if raw is not None and raw.strip():
             valid = validate(raw)
             if valid is not None:
-                self._settled[qid] = valid
+                self._asked.append(
+                    Question(qid, kind, prompt, tuple(candidates), valid, settled=True)
+                )
                 return valid
-            error = '答案无效，请按 prompt 的说明重填'
-        self._questions.append(
-            Question(
-                id=qid,
-                kind=kind,
-                prompt=prompt,
-                candidates=tuple(candidates),
-                answer=raw or None,
-                error=error,
+            self._asked.append(
+                Question(
+                    qid,
+                    kind,
+                    prompt,
+                    tuple(candidates),
+                    raw,
+                    settled=False,
+                    error='已填的答案无效，按注释里的可填项重填',
+                )
             )
-        )
+            return None
+        self._asked.append(Question(qid, kind, prompt, tuple(candidates), None, settled=False))
         return None
 
 
@@ -117,11 +120,22 @@ def short_id(kind: str, *parts: str) -> str:
     return f'{kind}-{hashlib.blake2s(seed, digest_size=4).hexdigest()}'
 
 
+def sheet(path: Path) -> Path:
+    '''The answer sheet beside a plan's JSON file, which holds everything but the answers.'''
+    return path.with_suffix('.toml')
+
+
 def answers(path: Path, command: str, args: Mapping[str, str]) -> dict[str, str]:
-    '''Answers already written into the plan file, if it belongs to this invocation.'''
+    '''Answers written into this invocation's answer sheet, if it belongs to it.'''
     if not path.exists():
         return {}
     payload = jsonio.mapping(jsonio.read(path), 'plan.json')
+    version = jsonio.maybe_integer(payload, 'version')
+    if version != VERSION:
+        raise PlanError(
+            f'{path} 的计划版本是 {version}，本版本只读版本 {VERSION}。\n'
+            '删掉这个文件与它旁边的 .toml 答卷，重跑同一条命令会重新生成。'
+        )
     stored_command = jsonio.maybe_text(payload, 'command')
     stored_args = {
         key: str(value) for key, value in jsonio.mapping(payload.get('args'), 'args').items()
@@ -130,46 +144,97 @@ def answers(path: Path, command: str, args: Mapping[str, str]) -> dict[str, str]
         raise PlanError(
             f'{path} 属于「{stored_command}」命令或另一组参数。\n'
             '改回原来的参数，或把 args 段改成这次的参数再重跑，已填的答案会继续沿用。'
-            '删除该文件则重新提问。'
+            '删掉这个文件与它的 .toml 答卷则重新提问。'
         )
-    found: dict[str, str] = {
-        key: value
-        for key, value in jsonio.mapping(payload.get('answers', {}), 'answers').items()
-        if isinstance(value, str) and value.strip()
-    }
-    for item in jsonio.sequence(payload.get('questions'), 'questions'):
-        question = jsonio.mapping(item, 'question')
-        answer = jsonio.maybe_text(question, 'answer')
-        qid = jsonio.maybe_text(question, 'id')
-        if qid is not None and answer is not None and answer.strip():
-            found[qid] = answer
-    return found
+    found = _read_sheet(sheet(path))
+    return {key: value for key, value in found.items() if value.strip()}
 
 
 def save(
     path: Path,
     command: str,
     args: Mapping[str, str],
-    questions: Sequence[Question],
+    ask: Interrogator,
     decisions: Sequence[Mapping[str, object]],
-    settled: Mapping[str, str],
 ) -> None:
     jsonio.write(
         path,
         {
-            'version': 1,
+            'version': VERSION,
             'command': command,
             'args': dict(args),
-            'intro': INTRO,
             'decisions': list(decisions),
-            'answers': dict(settled),
-            'questions': [question.to_json() for question in questions],
+            'questions': [question.to_json() for question in ask.reached],
         },
     )
+    sheet(path).write_text(_render(ask.reached, path.name), encoding='utf-8')
 
 
 def discard(path: Path) -> None:
     path.unlink(missing_ok=True)
+    sheet(path).unlink(missing_ok=True)
+
+
+def _render(questions: Sequence[Question], plan_name: str) -> str:
+    lines = [f'# 本文件是 {plan_name} 的答案，由 linktool 生成。']
+    lines.extend(f'# {line}' for line in INTRO.splitlines())
+    lines.append('')
+    for question in questions:
+        lines.extend(_block(question))
+        lines.append('')
+    return '\n'.join(lines)
+
+
+def _block(question: Question) -> list[str]:
+    lines = [f'# {question.id}  {_KINDS[question.kind]}']
+    lines.extend(f'# {line}' for line in question.prompt.splitlines())
+    lines.append(f'# 可填：{_accepted(question)}')
+    lines.extend(
+        f'#   {candidate.index}  {candidate.value}  {candidate.label}'
+        for candidate in question.candidates
+    )
+    if question.error is not None:
+        lines.append(f'# {question.error}')
+    elif question.settled:
+        lines.append('# 已采纳')
+    answer = question.answer or ''
+    lines.append(f'{_toml_value(question.id)} = {_toml_value(answer)}')
+    return lines
+
+
+_KINDS = {'confirm': '确认', 'choice': '选择', 'fill': '填写'}
+
+
+def _accepted(question: Question) -> str:
+    if question.kind == 'confirm':
+        return 'yes 或 no'
+    if question.kind == 'fill':
+        return '候选序号、本机路径，或 skip'
+    values = '、'.join(candidate.value for candidate in question.candidates)
+    return (
+        f'{values}、序号 {question.candidates[0].index}～{question.candidates[-1].index}，或 skip'
+    )
+
+
+def _toml_value(text: str) -> str:
+    '''Quote a key or value so a Windows path keeps its backslashes as typed.'''
+    if "'" in text or '\n' in text:
+        escaped = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        return f'"{escaped}"'
+    return f"'{text}'"
+
+
+def _read_sheet(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        payload = tomllib.loads(path.read_text(encoding='utf-8'))
+    except tomllib.TOMLDecodeError as error:
+        raise PlanError(
+            f'{path} 不是有效的 TOML：{error}\n'
+            "值请用单引号括起；用双引号时反斜杠要写成 \\\\，例如 'D:\\a\\b'。"
+        ) from error
+    return {key: value for key, value in payload.items() if isinstance(value, str)}
 
 
 def _confirm(raw: str) -> str | None:

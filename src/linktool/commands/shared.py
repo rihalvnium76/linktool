@@ -158,7 +158,7 @@ def await_answers(
     ask: plan.Interrogator,
     decisions: Sequence[Mapping[str, object]] = (),
 ) -> int:
-    plan.save(plan_path, command, args, ask.questions, decisions, ask.settled)
-    log.note(f'有 {len(ask.questions)} 项需要确认，已写入 {plan_path}')
-    log.note('填好每一题的 answer 后，用同样的参数重新运行这条命令。')
+    plan.save(plan_path, command, args, ask, decisions)
+    log.note(f'有 {len(ask.pending)} 项需要确认，答案写在 {plan.sheet(plan_path)}')
+    log.note('填好每一题后，用同样的参数重新运行这条命令。')
     return EXIT_PENDING

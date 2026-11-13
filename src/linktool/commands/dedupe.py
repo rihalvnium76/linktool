@@ -43,7 +43,7 @@ def run(config: Config, *, stage: bool) -> int:
     records = [record for group in groups if (record := decider.decide(group)) is not None]
     if decider.blocked:
         shared.confirm_unavailable(ask, decider.blocked, verb='暂存', keeping='留在原处')
-    if ask.questions:
+    if ask.pending:
         return shared.await_answers(plan_path, command, args, ask, decider.decisions)
     if not records:
         log.note(

@@ -67,7 +67,7 @@ def run(config: Config) -> int:
         if gate is False:
             raise errors.ToolError('创建副本未获确认，本次未执行')
 
-    if ask.questions:
+    if ask.pending:
         return shared.await_answers(plan_path, 'rebuild', args, ask)
     if not actions:
         log.note('没有可重建的条目')

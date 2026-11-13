@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from pathlib import Path
 from typing import cast
@@ -40,15 +41,22 @@ def _questions(plan_path: Path) -> list[dict[str, object]]:
     return [cast(dict[str, object], item) for item in cast(list[object], raw)]
 
 
+def _sheet(plan_path: Path) -> Path:
+    return plan_path.with_suffix('.toml')
+
+
+def _fill(lines: list[str], prefix: str, value: str) -> None:
+    for index, line in enumerate(lines):
+        found = re.match(r"^'([^']+)' = ", line)
+        if found is not None and found.group(1).startswith(prefix):
+            lines[index] = f"'{found.group(1)}' = '{value}'"
+
+
 def _answer(plan_path: Path, prefix: str, value: str) -> None:
-    payload = _plan(plan_path)
-    raw = payload['questions']
-    assert isinstance(raw, list)
-    for item in cast(list[object], raw):
-        question = cast(dict[str, object], item)
-        if str(question['id']).startswith(prefix):
-            question['answer'] = value
-    plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    sheet = _sheet(plan_path)
+    lines = sheet.read_text(encoding='utf-8').splitlines()
+    _fill(lines, prefix, value)
+    sheet.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 def _accept(plan_path: Path) -> None:
@@ -493,7 +501,7 @@ def test_scan_outside_the_base_asks_first(tmp_path: Path) -> None:
 
     _answer(plan_path, 'scan-', 'yes')
     assert call(*args) == 3
-    assert _questions(plan_path)[0]['kind'] == 'choice'
+    assert [question['kind'] for question in _questions(plan_path)] == ['confirm', 'choice']
 
 
 def test_a_higher_base_records_paths_from_above_the_state(tmp_path: Path) -> None:
