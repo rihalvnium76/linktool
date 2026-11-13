@@ -71,9 +71,9 @@ def _many(args: argparse.Namespace, name: str) -> tuple[str, ...]:
 
 def _addressing(*, state_required: bool, base: bool) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--state', metavar='PATH', required=state_required, help=STATE_HELP)
+    parser.add_argument('-S', '--state', metavar='PATH', required=state_required, help=STATE_HELP)
     if base:
-        parser.add_argument('--base', metavar='PATH', help=BASE_HELP)
+        parser.add_argument('-b', '--base', metavar='PATH', help=BASE_HELP)
     return parser
 
 
@@ -87,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
 
     scanning = argparse.ArgumentParser(add_help=False)
     scanning.add_argument(
+        '-s',
         '--scan',
         action='extend',
         nargs='+',
@@ -98,6 +99,7 @@ def _parser() -> argparse.ArgumentParser:
 
     sources = argparse.ArgumentParser(add_help=False)
     sources.add_argument(
+        '-p',
         '--prefer',
         action='extend',
         nargs='+',
@@ -113,6 +115,7 @@ def _parser() -> argparse.ArgumentParser:
 
     linking = argparse.ArgumentParser(add_help=False)
     linking.add_argument(
+        '-r',
         '--rel-mode',
         choices=['base', 'all', 'off'],
         help='链接指向的写法：base 只把基准目录内的转相对，all 全部尝试，off 保留绝对',
@@ -120,6 +123,7 @@ def _parser() -> argparse.ArgumentParser:
 
     staging = argparse.ArgumentParser(add_help=False)
     staging.add_argument(
+        '-x',
         '--staging',
         action='extend',
         nargs='+',

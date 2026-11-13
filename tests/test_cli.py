@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from linktool import cli, config
-from linktool.commands import dedupe
+from linktool.commands import dedupe, fix
 
 SOURCE = Path(__file__).resolve().parent.parent / 'src'
 
@@ -20,6 +20,17 @@ def _capture(monkeypatch: pytest.MonkeyPatch) -> list[config.Config]:
         return 0
 
     monkeypatch.setattr(dedupe, 'run', capture)
+    return seen
+
+
+def _capture_fix(monkeypatch: pytest.MonkeyPatch) -> list[config.Config]:
+    seen: list[config.Config] = []
+
+    def capture(settings: config.Config) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr(fix, 'run', capture)
     return seen
 
 
@@ -59,6 +70,47 @@ def test_the_one_scan_path_supplies_the_state_and_base(
 
     assert seen[0].state == tmp_path
     assert seen[0].base == tmp_path
+
+
+def test_every_short_name_stands_for_the_same_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = tmp_path / 'tree'
+    other = tmp_path / 'other'
+    staging = tmp_path / 'stag'
+    record = tmp_path / 'rec'
+    for path in (tree, other, staging, record):
+        path.mkdir()
+    seen = _capture(monkeypatch)
+
+    argv = [
+        'stage',
+        '-s', str(tree), str(other),
+        '-S', str(record),
+        '-b', str(tmp_path),
+        '-x', str(staging),
+        '-p', str(tree),
+    ]  # fmt: skip
+    assert cli.main(argv) == 0
+
+    settings = seen[0]
+    assert settings.scan == (tree, other)
+    assert settings.state == record
+    assert settings.base == tmp_path
+    assert settings.staging == (staging,)
+    assert settings.prefer == (tree,)
+
+
+def test_the_rel_mode_short_name_stands_for_the_same_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = _capture_fix(monkeypatch)
+
+    assert cli.main(['fix', '-s', str(tmp_path), '-S', str(tmp_path), '-r', 'all']) == 0
+
+    assert seen[0].scan == (tmp_path,)
+    assert seen[0].state == tmp_path
+    assert seen[0].rel_mode == 'all'
 
 
 def test_several_scan_paths_need_a_state(tmp_path: Path) -> None:
