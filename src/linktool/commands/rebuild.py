@@ -17,7 +17,7 @@ from linktool.fs import (
     remove_path,
     set_times,
 )
-from linktool.paths import RelMode, is_within, link_text, plain
+from linktool.paths import RelMode, is_within, link_text, plain, same_volume
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +92,7 @@ def _plan_group(
     if source is None or not source.exists():
         answer = ask.fill(
             plan.short_id('missing', group.key),
-            f'这一组的源已不存在：{group.source.label if group.source is not None else ""}\n'
+            f'这一组的源已不存在：{source if source is not None else ""}\n'
             f'待重建 {len(members)} 条路径。请填一个本机路径作为替代源，或 skip 跳过该组。',
             (),
         )
@@ -121,14 +121,14 @@ def _plan_group(
             continue
         method = _method(group, member, source, target, prober)
         if method is None:
-            blocked.append(member.label)
+            blocked.append(str(target))
             continue
         if not present:
             actions.append(Action(group, member, source, target, method))
             continue
         choice = ask.choose(
             plan.short_id('clash', member.label),
-            f'重建目标已存在且内容不同：{member.label}\n'
+            f'重建目标已存在且内容不同：{target}\n'
             f'现内容与源 {source} 不一致。填 replace 覆盖它，或 skip 保留它。',
             (
                 plan.Candidate(index=1, value='replace', label='replace 覆盖现有文件'),
@@ -153,18 +153,11 @@ def _method(
     capabilities = prober.capabilities(folder)
     if group.dir_target is not None or member.kind is not Kind.FILE:
         return Built.SYMLINK if capabilities.symlink else None
-    if capabilities.hardlink and _same_volume(source, folder):
+    if capabilities.hardlink and same_volume(source, folder):
         return Built.HARDLINK
     if capabilities.symlink:
         return Built.SYMLINK
     return Built.COPY
-
-
-def _same_volume(first: Path, second: Path) -> bool:
-    try:
-        return os.stat(first).st_dev == os.stat(second).st_dev
-    except OSError:
-        return False
 
 
 def _satisfied(target: Path, source: Path, group: state.GroupRecord) -> bool:

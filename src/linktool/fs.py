@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from linktool import log, winstamp
-from linktool.paths import read_link
+from linktool.paths import read_link, same_volume, volume_key
 
 # Windows 把「链接自身指向目录」记在链接的属性位上，目标是否还在都不影响这一位。
 FILE_ATTRIBUTE_DIRECTORY = 0x10
@@ -141,7 +141,7 @@ def move_file(source: Path, path: Path) -> None:
     and keeps both times exactly. A copy gets a new inode, so it happens only where the
     two volumes make a rename impossible.
     '''
-    if os.stat(source).st_dev == os.stat(path.parent).st_dev:
+    if same_volume(source, path.parent):
         os.replace(source, path)
         return
     copy_file(source, path)
@@ -163,15 +163,15 @@ class Prober:
     '''
 
     def __init__(self) -> None:
-        self._cache: dict[int, Capabilities] = {}
+        self._cache: dict[str, Capabilities] = {}
 
     def capabilities(self, directory: Path) -> Capabilities:
-        device = os.stat(directory).st_dev
-        cached = self._cache.get(device)
+        key = volume_key(directory)
+        cached = self._cache.get(key)
         if cached is not None:
             return cached
         found = self._probe(directory)
-        self._cache[device] = found
+        self._cache[key] = found
         return found
 
     def _probe(self, directory: Path) -> Capabilities:

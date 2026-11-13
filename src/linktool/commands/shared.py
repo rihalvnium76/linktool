@@ -1,11 +1,9 @@
-import os
-
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from linktool import EXIT_PENDING, errors, log, plan, state
 from linktool.config import Config
-from linktool.paths import from_rel, is_within, plain, to_rel
+from linktool.paths import from_rel, is_within, plain, same_volume, to_rel
 
 
 def snapshot(config: Config) -> dict[str, str]:
@@ -22,8 +20,13 @@ def snapshot(config: Config) -> dict[str, str]:
 
 
 def record_place(base: Path, path: Path) -> tuple[str | None, str | None]:
-    '''How the record holds one path: relative to the base, or absolute.'''
-    if is_within(path, base):
+    '''How the record holds one path: relative to the base, or absolute off its volume.
+
+    A relative path follows the base, so a tree copied elsewhere rebuilds into the copy,
+    and it may climb above the base with '..'. Two volumes share no prefix, which only an
+    absolute path spans.
+    '''
+    if same_volume(path, base):
         return to_rel(path, base), None
     return None, str(path)
 
@@ -97,7 +100,7 @@ def effective_base(store: state.StateStore, config: Config, ask: plan.Interrogat
 
 
 def scan_gate(ask: plan.Interrogator, scans: Sequence[Path], base: Path) -> bool | None:
-    '''Ask before scanning paths the record would hold as absolute paths.'''
+    '''Ask before scanning paths whose members land outside the base.'''
     outside = [path for path in scans if not is_within(path, base)]
     if not outside:
         return True
@@ -105,18 +108,15 @@ def scan_gate(ask: plan.Interrogator, scans: Sequence[Path], base: Path) -> bool
         plan.short_id('scan', *(str(path) for path in outside)),
         '这些扫描路径在基准目录之外：\n'
         + '\n'.join(f'  {path}' for path in outside)
-        + '\n它们名下的路径在记录里会写成绝对路径，换一份记录或换一台机器后可能指向'
-        '不存在的位置。确认扫描吗？（yes/no）',
+        + '\n它们名下的路径会指到基准之外。确认扫描吗？（yes/no）',
     )
 
 
 def staging_area(areas: Sequence[Path], target: Path) -> Path:
     '''The area that holds `target`: the first on its volume, else the first given.'''
-    device = _device(target)
-    if device is not None:
-        for area in areas:
-            if _device(area) == device:
-                return area
+    for area in areas:
+        if same_volume(area, target):
+            return area
     return areas[0]
 
 
@@ -124,13 +124,6 @@ def staged_path(owner: Path, base: Path, areas: Sequence[Path], member: state.Me
     target = member_path(base, member)
     area = staging_area(areas, target)
     return state.staged_location(owner, area, target)
-
-
-def _device(path: Path) -> int | None:
-    try:
-        return os.stat(path).st_dev
-    except OSError:
-        return None
 
 
 def confirm_unavailable(

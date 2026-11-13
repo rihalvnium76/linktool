@@ -1,10 +1,13 @@
 import json
+import os
+import string
 
 from pathlib import Path
 
 import pytest
 
 from linktool import state
+from linktool.commands import shared
 from linktool.fs import Kind
 from linktool.hashing import Identity
 
@@ -100,3 +103,39 @@ def test_a_path_outside_the_owner_gets_its_own_directory(tmp_path: Path) -> None
     assert first.name == second.name == 'a.bin'
     assert first.parent.parent == area / 'files' / 'external'
     assert first == state.staged_location(owner, area, tmp_path / 'one' / 'a.bin')
+
+
+def test_a_path_outside_the_base_is_recorded_relative_to_it(tmp_path: Path) -> None:
+    base = tmp_path / 'tree'
+    base.mkdir()
+    outside = tmp_path / 'one' / 'b.bin'
+    outside.parent.mkdir()
+    outside.write_bytes(b'payload')
+
+    assert shared.record_place(base, outside) == ('../one/b.bin', None)
+
+
+def test_a_path_on_another_volume_is_recorded_absolute(tmp_path: Path) -> None:
+    probe = _probe_elsewhere(tmp_path)
+    if probe is None:
+        pytest.skip('本机只有一个可写的卷')
+    try:
+        assert shared.record_place(tmp_path, probe) == (None, str(probe))
+    finally:
+        probe.unlink()
+
+
+def _probe_elsewhere(folder: Path) -> Path | None:
+    '''An empty file on a volume that no relative path from `folder` reaches, or None.'''
+    for letter in string.ascii_uppercase:
+        probe = Path(f'{letter}:/') / f'linktool-probe-{os.getpid()}'
+        try:
+            probe.write_bytes(b'')
+        except OSError:
+            continue
+        try:
+            os.path.relpath(probe, folder)
+        except ValueError:
+            return probe
+        probe.unlink()
+    return None

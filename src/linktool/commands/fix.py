@@ -123,7 +123,7 @@ def run(config: Config) -> int:
         candidates = exact or finder.match_by_name(entry.link_text)
         answer = ask.fill(
             plan.short_id('fix', label),
-            f'失效链接 {label} 原本指向 {entry.link_text}\n'
+            f'失效链接 {entry.path} 原本指向 {entry.link_text}\n'
             f'找到 {len(candidates)} 个候选源。填候选序号、本机路径，或 skip 跳过。',
             tuple(
                 plan.Candidate(index=index, value=str(path), label=str(path))

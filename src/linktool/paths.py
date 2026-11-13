@@ -1,4 +1,5 @@
 import os
+import sys
 
 from enum import StrEnum
 from pathlib import Path
@@ -45,6 +46,25 @@ def is_within(path: Path, root: Path) -> bool:
     try:
         return os.path.commonpath([plain(path), plain(root)]) == plain(root)
     except ValueError:
+        return False
+
+
+def volume_key(path: Path) -> str:
+    '''A key naming the volume that holds `path`, so two paths can be compared.
+
+    Windows reports the same volume number for every drive's own root, so a drive letter
+    names the volume instead.
+    '''
+    if sys.platform == 'win32':
+        return os.path.splitdrive(plain(path))[0]
+    return str(os.lstat(path).st_dev)
+
+
+def same_volume(first: Path, second: Path) -> bool:
+    '''Whether both paths sit on one volume, where a rename and a relative path work.'''
+    try:
+        return volume_key(first) == volume_key(second)
+    except OSError:
         return False
 
 

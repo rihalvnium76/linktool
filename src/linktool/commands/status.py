@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from linktool import EXIT_OK, log, state
+from linktool.commands import shared
 from linktool.config import Config
 from linktool.paths import plain
 
@@ -30,14 +31,21 @@ def _report_pending(folder: Path, store: state.StateStore) -> None:
     pending = store.pending()
     members = sorted(
         (member for group in pending for member in group.members if member.status == state.PENDING),
-        key=lambda member: member.label,
+        key=lambda member: _place(store, member),
     )
     if not members:
         log.note(f'{folder}: 没有待重建的条目')
         return
     log.note(f'{folder}: {len(members)} 条待重建，分布在 {len(pending)} 组')
     for member in members:
-        log.note(f'  {member.label}  {member.kind}')
+        log.note(f'  {_place(store, member)}  {member.kind}')
+
+
+def _place(store: state.StateStore, member: state.MemberRecord) -> str:
+    '''The path a person can act on, resolved against the record's own base.'''
+    if store.base is None:
+        return member.label
+    return str(shared.member_path(store.base, member))
 
 
 def _report_staged(area: Path, held: state.StagingStore) -> None:

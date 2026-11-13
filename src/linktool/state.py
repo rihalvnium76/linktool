@@ -12,7 +12,7 @@ from linktool.hashing import Identity
 from linktool.paths import from_rel, is_within, plain, to_rel
 
 WORK_DIR = '.linktool'
-VERSION = 2
+VERSION = 3
 PENDING = 'pending'
 REBUILT = 'rebuilt'
 STAGED = 'staged'
@@ -25,7 +25,12 @@ class RecordError(ToolError):
 
 @dataclass(slots=True)
 class MemberRecord:
-    '''One path the tool removed, staged or rebuilt, and what it must become again.'''
+    '''One path the tool removed, staged or rebuilt, and what it must become again.
+
+    `rel` is relative to the record's base and may climb above it with '..', so the member
+    follows the base. `abs` holds a member on another volume, which no relative path
+    reaches.
+    '''
 
     rel: str | None
     abs: str | None
@@ -69,7 +74,7 @@ class MemberRecord:
 
 @dataclass(frozen=True, slots=True)
 class Marker:
-    '''Where a group's source sits: relative to the record's base, or absolute.'''
+    '''Where a group's source sits, in the same two forms as a member path.'''
 
     rel: str | None = None
     abs: str | None = None

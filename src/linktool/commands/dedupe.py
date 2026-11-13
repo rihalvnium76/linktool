@@ -108,8 +108,7 @@ class Decider:
             gate = self.ask.confirm(
                 plan.short_id('outside', identify.signature(group)),
                 f'这一组的源在基准目录之外：{decided}\n'
-                '它在记录里会写成绝对路径，换一份记录或换一台机器后可能指向不存在的位置。'
-                '确认以它作为源吗？（yes/no）',
+                '记录里的这条路径会指到基准之外。确认以它作为源吗？（yes/no）',
             )
             if gate is None or not gate:
                 return None
@@ -122,12 +121,15 @@ class Decider:
             record = self._without_unstaged(record)
             if record is None:
                 return None
+        kept = shared.source_path(self.base, record)
         self.decisions.append(
             plan.Decision(
-                source=record.source.label if record.source is not None else '',
+                source=str(kept) if kept is not None else '',
                 reason=_REASONS[reason],
                 identity=_identity_note(group),
-                paths=tuple(member.label for member in record.members),
+                paths=tuple(
+                    str(shared.member_path(self.base, member)) for member in record.members
+                ),
             )
         )
         return record
@@ -135,7 +137,7 @@ class Decider:
     def _without_unstaged(self, record: state.GroupRecord) -> state.GroupRecord | None:
         '''Drop the links the staging volume cannot hold, naming them for one confirmation.'''
         refused = {
-            member.label
+            member.label: str(shared.member_path(self.base, member))
             for member in record.members
             if member.kind is not Kind.FILE
             and not self.prober.capabilities(
@@ -146,7 +148,7 @@ class Decider:
         }
         if not refused:
             return record
-        self.blocked.extend(sorted(refused))
+        self.blocked.extend(sorted(refused.values()))
         kept = [member for member in record.members if member.label not in refused]
         return replace(record, members=kept) if kept else None
 

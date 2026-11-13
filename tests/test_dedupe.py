@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 
 from pathlib import Path
 
@@ -89,7 +90,7 @@ def test_the_answer_sheet_lists_every_decision(tmp_path: Path) -> None:
     assert call('remove', '--scan', str(root), '--prefer', str(root / 'keep')) == 3
     found = _decisions(root / '.linktool' / 'plan-remove.json')
     assert [(item.source, item.reason, item.paths) for item in found] == [
-        ('keep/a.bin', '偏好目录下唯一', ('other/b.bin',))
+        (str(root / 'keep' / 'a.bin'), '偏好目录下唯一', (str(root / 'other' / 'b.bin'),))
     ]
 
 
@@ -121,7 +122,7 @@ def test_pick_first_proposes_a_source_for_one_confirmation(tmp_path: Path) -> No
     plan_path = root / '.linktool' / 'plan-remove.json'
     assert all(question.id.startswith('plan-') for question in _questions(plan_path))
     assert _decisions(plan_path)[0].reason == '无规则可依，按路径排序取最前'
-    assert _decisions(plan_path)[0].source == 'a.bin'
+    assert _decisions(plan_path)[0].source == str(root / 'a.bin')
 
     _accept(plan_path)
     assert call(*args) == 0
@@ -505,6 +506,43 @@ def test_scan_outside_the_base_asks_first(tmp_path: Path) -> None:
     assert [question.kind for question in _questions(plan_path)] == ['confirm', 'choice']
 
 
+def test_a_member_outside_the_base_follows_the_tree_it_was_copied_to(tmp_path: Path) -> None:
+    old = tmp_path / 'old'
+    _write(old / 'tree' / 'keep' / 'a.bin', b'payload')
+    _write(old / '1' / 'b.bin', b'payload')
+
+    args = (
+        'remove',
+        '--state',
+        str(old / 'tree'),
+        '--scan',
+        str(old / 'tree'),
+        str(old / '1'),
+        '--prefer',
+        str(old / 'tree' / 'keep'),
+    )
+    assert call(*args) == 3
+    plan_path = old / 'tree' / '.linktool' / 'plan-remove.json'
+    _answer(plan_path, 'scan-', 'yes')
+    assert call(*args) == 3
+    _accept(plan_path)
+    assert call(*args) == 0
+    assert not (old / '1' / 'b.bin').exists()
+
+    recorded = json.loads((old / 'tree' / '.linktool' / 'state.json').read_text(encoding='utf-8'))
+    member = recorded['groups'][0]['members'][0]
+    assert member['rel'] == '../1/b.bin'
+    assert member['abs'] is None
+
+    shutil.copytree(old, tmp_path / 'new')
+    shutil.rmtree(old)
+    assert call('rebuild', '--state', str(tmp_path / 'new' / 'tree')) == 0
+    rebuilt = tmp_path / 'new' / '1' / 'b.bin'
+    assert rebuilt.read_bytes() == b'payload'
+    if supports_hardlink():
+        assert rebuilt.stat().st_ino == (tmp_path / 'new' / 'tree' / 'keep' / 'a.bin').stat().st_ino
+
+
 def test_a_higher_base_records_paths_from_above_the_state(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'keep' / 'a.bin', b'payload')
@@ -523,7 +561,7 @@ def test_a_higher_base_records_paths_from_above_the_state(tmp_path: Path) -> Non
     )
     assert call(*args) == 3
     plan_path = root / '.linktool' / 'plan-remove.json'
-    assert _decisions(plan_path)[0].paths == ('tree/other/b.bin',)
+    assert _decisions(plan_path)[0].paths == (str(root / 'other' / 'b.bin'),)
     _accept(plan_path)
     assert call(*args) == 0
     assert not (root / 'other' / 'b.bin').exists()
@@ -603,7 +641,7 @@ def test_status_counts_what_each_record_still_holds(
     assert call('status', '--state', str(root)) == 0
     output = capsys.readouterr().err
     assert '2 条待重建，分布在 1 组' in output
-    assert 'other/b.bin' in output
+    assert str(root / 'other' / 'b.bin') in output
     assert '2 条待还原' in output
 
 
@@ -648,5 +686,5 @@ def test_the_gate_points_at_the_decisions_in_the_sheet(tmp_path: Path) -> None:
     sheet = _sheet(root / '.linktool' / 'plan-remove.json').read_text(encoding='utf-8')
     assert '# 本文件的 decisions 段列出这一轮的全部决定：1 组，1 条路径会被移除或暂存' in sheet
     assert '# decisions  这一轮的全部决定' in sheet
-    assert '#   源：a.bin（无规则可依，按路径排序取最前）' in sheet
-    assert '#   移除：b.bin' in sheet
+    assert '#   源：' + str(root / 'a.bin') + '（无规则可依，按路径排序取最前）' in sheet
+    assert '#   移除：' + str(root / 'b.bin') in sheet
