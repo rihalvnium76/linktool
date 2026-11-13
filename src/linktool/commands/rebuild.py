@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from linktool import EXIT_OK, errors, hashing, log, plan, state
+from linktool import EXIT_OK, errors, hashing, log, plan, sizes, state
 from linktool.commands import shared
 from linktool.config import Config
 from linktool.fs import (
@@ -62,7 +62,7 @@ def run(config: Config) -> int:
         gate = ask.confirm(
             plan.short_id('copy', *(str(action.target) for action in copies)),
             f'{len(copies)} 个成员无法用硬链接或符号链接重建，要改写成副本。\n'
-            f'预估总大小 {size} 字节。确认吗？（yes/no）',
+            f'预估总大小 {sizes.readable(size)}。确认吗？（yes/no）',
         )
         if gate is False:
             raise errors.ToolError('创建副本未获确认，本次未执行')

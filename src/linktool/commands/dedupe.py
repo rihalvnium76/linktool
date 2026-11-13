@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from linktool import EXIT_OK, errors, identify, log, plan, scan, state
+from linktool import EXIT_OK, errors, identify, log, plan, scan, sizes, state
 from linktool.commands import shared
 from linktool.config import Config, ConfigError, Pick
 from linktool.fs import (
@@ -186,7 +186,7 @@ _REASONS = {
 def _identity_note(group: identify.Group) -> str:
     if group.identity is None:
         return '目录链接'
-    return f'{group.identity.size} 字节 {group.identity.digest[:12]}'
+    return f'{sizes.readable(group.identity.size)} {group.identity.digest[:12]}'
 
 
 def _ask_for_the_plan(
@@ -213,7 +213,7 @@ def _ask_for_the_plan(
 
 def _describe(group: identify.Group) -> str:
     if group.identity is not None:
-        return f'（{group.identity.size} 字节）'
+        return f'（{sizes.readable(group.identity.size)}）'
     return '（目录链接）'
 
 
