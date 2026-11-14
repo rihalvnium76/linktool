@@ -1,12 +1,14 @@
 import os
+import re
 import subprocess
 import sys
 
+from importlib import metadata
 from pathlib import Path
 
 import pytest
 
-from linktool import cli, config
+from linktool import cli, config, source_digest
 from linktool.commands import dedupe, fix
 
 SOURCE = Path(__file__).resolve().parent.parent / 'src'
@@ -45,7 +47,41 @@ def test_module_entry_point_prints_the_version() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.startswith('linktool ')
+    assert re.fullmatch(r'linktool [0-9.]+ \([0-9a-f]{12}\)\n', result.stdout)
+
+
+def test_the_version_short_name_prints_what_the_long_one_prints(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    printed: list[str] = []
+    for flag in ('-V', '--version'):
+        with pytest.raises(SystemExit) as raised:
+            cli.main([flag])
+        assert raised.value.code == 0
+        printed.append(capsys.readouterr().out)
+
+    assert printed[0] == printed[1]
+    assert printed[0].startswith('linktool ')
+
+
+def test_the_source_digest_is_stable_and_short() -> None:
+    assert source_digest() == source_digest()
+    assert re.fullmatch(r'[0-9a-f]{12}', source_digest())
+
+
+def test_an_uninstalled_copy_names_its_source_without_a_version(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def missing(name: str) -> str:
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(cli.metadata, 'version', missing)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(['-V'])
+
+    assert raised.value.code == 0
+    assert re.fullmatch(r'linktool \([0-9a-f]{12}\)\n', capsys.readouterr().out)
 
 
 def test_a_list_setting_takes_several_values_in_one_flag(

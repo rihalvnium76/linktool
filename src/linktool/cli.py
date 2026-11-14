@@ -1,15 +1,40 @@
 import argparse
+import sys
 
 from collections.abc import Sequence
+from importlib import metadata
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
-from linktool import EXIT_ERROR, config, log
+from linktool import EXIT_ERROR, config, log, source_digest
 from linktool.commands import dedupe, fix, rebuild, restore, status
 from linktool.errors import ToolError
 
 STATE_HELP = '记录所在目录，记录写在 <state>/.linktool/；缺省时取唯一的 --scan 路径'
 BASE_HELP = '记录与链接的相对基准，缺省时取 --state'
+
+
+class _Version(argparse.Action):
+    '''Prints the version and the source digest, which only this option pays for.'''
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace | None,
+        values: str | Sequence[Any] | None,  # Any: argparse declares its own values so
+        option_string: str | None = None,
+    ) -> None:
+        sys.stdout.write(f'{_identity()}\n')
+        parser.exit()
+
+
+def _identity() -> str:
+    '''The installed version and the source digest; a copy run from `src` has no metadata.'''
+    try:
+        installed = metadata.version('linktool')
+    except metadata.PackageNotFoundError:
+        return f'linktool ({source_digest()})'
+    return f'linktool {installed} ({source_digest()})'
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -82,7 +107,7 @@ def _parser() -> argparse.ArgumentParser:
         prog='linktool',
         description='移除、暂存、重建、还原重复文件与链接，并修复失效的符号链接。',
     )
-    parser.add_argument('--version', action='version', version='linktool 0.1.0')
+    parser.add_argument('-V', '--version', action=_Version, nargs=0, help='版本与源码摘要')
     commands = parser.add_subparsers(dest='command', required=True)
 
     scanning = argparse.ArgumentParser(add_help=False)

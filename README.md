@@ -19,7 +19,9 @@ uv run linktool --help
 PYTHONPATH=src python -m linktool --help
 ```
 
-`python -m pip install .` 把 `linktool` 装进 `PATH`，构建时要联网下载 hatchling。
+`python -m pip install .` 把 `linktool` 装进 `PATH`，构建时要联网下载构建后端。
+
+这样从 `src` 直接跑时，环境里没有安装元数据，`linktool -V` 只报源码摘要，省掉版本号。
 
 ## 命令
 
@@ -65,6 +67,8 @@ linktool rebuild --state /storage/emulated/0/tree
 ```
 
 同一台机器上去重只需要 `remove` 加 `rebuild`。
+
+两边是不是同一份代码用 `linktool -V` 核对：版本来自安装元数据，同一个发布处处相同；括号里是 `src/linktool` 下每个文件内容算出的摘要，改一个字节就变。设备上的源码由 `git archive` 导出，没有 `.git`，摘要照样能算。
 
 ## 状态与记录
 
@@ -162,7 +166,7 @@ junction 按目录链接处理，重建时变成目录符号链接，转换时�
 
 `status` 不取任何选项，只取一个位置参数：状态区或暂存区的容器目录，缺省时取当前工作目录。它按 `<容器>/.linktool/` 里存在哪份清单来判断这个目录是哪一种，不去别的目录找。
 
-每个选项另有短名：`-b` 是 `--base`，`-x` 是 `--staging`（取自 eXchange），`-p` 是 `--prefer`，`-r` 是 `--rel-mode`。`-s` 与 `-S` 只差大小写，前者是 `--scan`，后者是 `--state`；两者收的都是目录路径，敲错大小写不会报错，路径会交给另一个参数。`--pick` 与 `--version` 没有短名。
+每个选项另有短名：`-b` 是 `--base`，`-x` 是 `--staging`（取自 eXchange），`-p` 是 `--prefer`，`-r` 是 `--rel-mode`，`-V` 是 `--version`。`-s` 与 `-S` 只差大小写，前者是 `--scan`，后者是 `--state`；两者收的都是目录路径，敲错大小写不会报错，路径会交给另一个参数。`--pick` 没有短名。
 
 四个选项各管一件事：
 
