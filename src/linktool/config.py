@@ -1,3 +1,5 @@
+import os
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -94,10 +96,16 @@ def _existing(items: Sequence[str], what: str) -> tuple[Path, ...]:
 
 
 def _named(items: Sequence[str]) -> tuple[Path, ...]:
-    '''Directories this run may create, so they only need to be distinct absolute paths.'''
+    '''Directories this run may create, so each only needs to be an absolute path.
+
+    `stage` creates the ones that do not exist yet, so a path that is already there has to
+    be the directory it would create.
+    '''
     found: list[Path] = []
     for item in items:
         path = Path(item).absolute()
+        if os.path.lexists(path) and not path.is_dir():
+            raise ConfigError(f'暂存区不是目录：{path}')
         if all(plain(path) != plain(known) for known in found):
             found.append(path)
     return tuple(found)

@@ -142,6 +142,19 @@ def test_a_staging_area_may_not_sit_inside_a_scan_path(tmp_path: Path) -> None:
     assert cli.main(['stage', '--scan', str(tmp_path), '--staging', str(tmp_path / 's')]) == 1
 
 
+def test_a_staging_area_that_exists_has_to_be_a_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tree = tmp_path / 'tree'
+    tree.mkdir()
+    taken = tmp_path / 'stage'
+    taken.write_bytes(b'')
+
+    assert cli.main(['stage', '--scan', str(tree), '--staging', str(taken)]) == 1
+
+    assert f'暂存区不是目录：{taken}' in capsys.readouterr().err
+
+
 def test_relative_paths_follow_the_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
