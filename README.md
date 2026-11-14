@@ -6,22 +6,26 @@
 
 需要 Python 3.14 以上。
 
-仓库自带 `uv` 环境：
+uv：
 
-```
+```sh
 uv sync
 uv run linktool --help
 ```
 
-用系统 Python 时把 `src` 加进导入路径，`xxhash` 需要预先装好：
+系统 Python：
 
+```sh
+python -m pip install xxhash
+
+# 安装进 PATH（可选），在仓库根执行
+python -m pip install .
+
+# 不安装时在 src 里直接跑
+cd src && python -m linktool --help
 ```
-PYTHONPATH=src python -m linktool --help
-```
 
-`python -m pip install .` 把 `linktool` 装进 `PATH`，构建时要联网下载构建后端。
-
-这样从 `src` 直接跑时，环境里没有安装元数据，`linktool -V` 只报源码摘要，省掉版本号。
+从 `src` 直接运行时，环境里没有安装元数据，`linktool -V` 只报源码摘要，省掉版本号。
 
 ## 命令
 
