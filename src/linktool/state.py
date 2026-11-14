@@ -187,11 +187,12 @@ def staged_location(owner: Path, area: Path, target: Path) -> Path:
 
     A path inside the owning tree keeps its relative layout, which stays readable. A path
     outside it lands under a digest of itself, so two targets sharing a name keep their
-    own directories, and staging the same target again lands on the same directory.
+    own directories, and staging the same target again lands on the same directory. A
+    digest is not injective, so the caller checks that no two targets land on one place.
     '''
     if is_within(target, owner):
         return from_rel(area.joinpath('files'), to_rel(target, owner))
-    handle = hashlib.blake2s(str(target).encode(), digest_size=4).hexdigest()
+    handle = hashlib.blake2s(str(target).encode(), digest_size=8).hexdigest()
     return area / 'files' / 'external' / handle / target.name
 
 

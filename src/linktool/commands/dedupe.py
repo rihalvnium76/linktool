@@ -41,6 +41,7 @@ def run(config: Config, *, stage: bool) -> int:
         ask=ask, owner=owner, base=base, areas=areas, prefer=config.prefer, pick=config.pick
     )
     records = [record for group in groups if (record := decider.decide(group)) is not None]
+    _require_distinct_places(records, owner, base, areas)
     if decider.blocked:
         shared.confirm_unavailable(ask, decider.blocked, verb='暂存', keeping='留在原处')
     if ask.pending:
@@ -232,6 +233,24 @@ def _label(member: identify.Participant, base: Path) -> str:
     if member.entry.kind is Kind.FILE:
         return name
     return f'{name}  ->  {member.real}'
+
+
+def _require_distinct_places(
+    records: list[state.GroupRecord], owner: Path, base: Path, areas: tuple[Path, ...]
+) -> None:
+    '''Refuse two targets on one staging place, where the second would overwrite the first.'''
+    if not areas:
+        return
+    taken: dict[str, str] = {}
+    for record in records:
+        for member in record.members:
+            target = shared.member_path(base, member)
+            place = plain(shared.staged_path(owner, base, areas, member))
+            known = taken.setdefault(place, str(target))
+            if known != str(target):
+                raise errors.ToolError(
+                    f'两条路径要放进暂存区的同一个位置 {place}：{known} 与 {target}。\n本次未执行。'
+                )
 
 
 def _require_owners(areas: tuple[Path, ...], owner: Path) -> None:

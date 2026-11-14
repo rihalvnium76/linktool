@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from linktool import state
 from linktool.cli import main
 from linktool.fs import Capabilities, Prober, supports_hardlink
 from sheet import decisions as _decisions
@@ -250,6 +251,35 @@ def test_staging_inside_a_scan_path_is_refused(tmp_path: Path) -> None:
     root = tmp_path / 'tree'
     _write(root / 'a.bin', b'payload')
     assert call('stage', '--scan', str(root), '--staging', str(root / 'stage')) == 1
+
+
+def test_two_targets_may_not_land_on_one_staging_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / 'tree'
+    staging = tmp_path / 'stage'
+    for name, content in (('a.bin', b'first'), ('b.bin', b'second')):
+        _write(root / 'keep' / name, content)
+        _write(root / 'other' / name, content)
+
+    def one_place(owner: Path, area: Path, target: Path) -> Path:
+        return area / 'files' / 'one-place'
+
+    monkeypatch.setattr(state, 'staged_location', one_place)
+    args = (
+        'stage',
+        '--scan',
+        str(root),
+        '--staging',
+        str(staging),
+        '--prefer',
+        str(root / 'keep'),
+    )
+    assert call(*args) == 1
+
+    assert '放进暂存区的同一个位置' in capsys.readouterr().err
+    assert (root / 'other' / 'a.bin').read_bytes() == b'first'
+    assert (root / 'other' / 'b.bin').read_bytes() == b'second'
 
 
 def test_a_staging_area_of_another_tree_is_refused(tmp_path: Path) -> None:
