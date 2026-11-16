@@ -29,7 +29,7 @@ def run(config: Config, *, stage: bool) -> int:
     base = shared.effective_base(store, config, ask)
     gate = shared.scan_gate(ask, config.scan, base if base is not None else config.base)
     if base is None or gate is None:
-        return shared.await_answers(plan_path, command, args, ask)
+        return shared.await_answers(plan_path, command, args, ask, config.open_mode)
     if not gate:
         raise ConfigError('基准目录之外的扫描路径未获确认，本次未执行')
     _create(areas)
@@ -45,7 +45,9 @@ def run(config: Config, *, stage: bool) -> int:
     if decider.blocked:
         shared.confirm_unavailable(ask, decider.blocked, verb='暂存', keeping='留在原处')
     if ask.pending:
-        return shared.await_answers(plan_path, command, args, ask, decider.decisions)
+        return shared.await_answers(
+            plan_path, command, args, ask, config.open_mode, decider.decisions
+        )
     if not records:
         log.note(
             '没有可处理的重复文件或链接'
@@ -59,7 +61,9 @@ def run(config: Config, *, stage: bool) -> int:
         return EXIT_OK
     released = _ask_for_the_plan(ask, records, decider.decisions, plan_path)
     if released is None:
-        return shared.await_answers(plan_path, command, args, ask, decider.decisions)
+        return shared.await_answers(
+            plan_path, command, args, ask, config.open_mode, decider.decisions
+        )
     if not released:
         raise errors.ToolError(
             f'这份计划未获确认，磁盘上没有任何改动。'

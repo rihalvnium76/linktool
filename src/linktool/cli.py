@@ -79,6 +79,7 @@ def _settings(args: argparse.Namespace) -> config.Config:
         prefer=_many(args, 'prefer'),
         rel_mode=_one(args, 'rel_mode'),
         pick=_one(args, 'pick'),
+        open_mode=_one(args, 'open'),
     )
 
 
@@ -158,29 +159,43 @@ def _parser() -> argparse.ArgumentParser:
         help='暂存区目录，可给多个；成员优先放进与它同卷的那个',
     )
 
+    answering = argparse.ArgumentParser(add_help=False)
+    answering.add_argument(
+        '--open',
+        choices=['always', 'once', 'never'],
+        help='答卷有未答题时替你打开：always 每次重跑都打开，once 只在首次生成答卷时打开，'
+        'never 不打开；缺省 always',
+    )
+
     commands.add_parser(
         'remove',
-        parents=[_addressing(state_required=False, base=True), scanning, sources],
+        parents=[_addressing(state_required=False, base=True), scanning, sources, answering],
         help='移除重复文件与链接，保留每组的源',
     )
     commands.add_parser(
         'stage',
-        parents=[_addressing(state_required=False, base=True), scanning, sources, staging],
+        parents=[
+            _addressing(state_required=False, base=True),
+            scanning,
+            sources,
+            staging,
+            answering,
+        ],
         help='把重复文件与链接移入暂存区',
     )
     commands.add_parser(
         'rebuild',
-        parents=[_addressing(state_required=True, base=True), linking],
+        parents=[_addressing(state_required=True, base=True), linking, answering],
         help='按记录重建被移除的文件与链接',
     )
     commands.add_parser(
         'restore',
-        parents=[_addressing(state_required=True, base=False)],
+        parents=[_addressing(state_required=True, base=False), answering],
         help='把暂存区里的条目移回原位',
     )
     commands.add_parser(
         'fix',
-        parents=[_addressing(state_required=False, base=True), scanning, linking],
+        parents=[_addressing(state_required=False, base=True), scanning, linking, answering],
         help='修复因源被移动而失效的符号链接',
     )
     status_parser = commands.add_parser(

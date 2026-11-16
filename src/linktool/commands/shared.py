@@ -1,8 +1,8 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from linktool import EXIT_PENDING, errors, log, plan, state
-from linktool.config import Config
+from linktool import EXIT_PENDING, editor, errors, log, plan, state
+from linktool.config import Config, OpenMode
 from linktool.paths import from_rel, is_within, plain, same_volume, to_rel
 
 
@@ -149,9 +149,13 @@ def await_answers(
     command: str,
     args: Mapping[str, str],
     ask: plan.Interrogator,
+    open_mode: OpenMode,
     decisions: Sequence[plan.Decision] = (),
 ) -> int:
+    sheet = plan.sheet(plan_path)
+    first_time = not sheet.exists()
     plan.save(plan_path, command, args, ask, decisions)
-    log.note(f'有 {len(ask.pending)} 项需要确认，答案写在 {plan.sheet(plan_path)}')
+    log.note(f'有 {len(ask.pending)} 项需要确认，答案写在 {sheet}')
     log.note('填好每一题后，用同样的参数重新运行这条命令。')
+    editor.open_sheet(sheet, open_mode, first_time=first_time)
     return EXIT_PENDING

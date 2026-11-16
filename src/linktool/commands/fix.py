@@ -93,7 +93,7 @@ def run(config: Config) -> int:
     base = shared.effective_base(store, config, ask)
     gate = shared.scan_gate(ask, config.scan, base if base is not None else config.base)
     if base is None or gate is None:
-        return shared.await_answers(plan_path, 'fix', args, ask)
+        return shared.await_answers(plan_path, 'fix', args, ask, config.open_mode)
     if not gate:
         raise errors.ToolError('基准目录之外的扫描路径未获确认，本次未执行')
 
@@ -138,7 +138,7 @@ def run(config: Config) -> int:
         actions.append((entry, source))
 
     if ask.pending:
-        return shared.await_answers(plan_path, 'fix', args, ask)
+        return shared.await_answers(plan_path, 'fix', args, ask, config.open_mode)
 
     for entry, source in actions:
         text = link_text(source, entry.path, base, config.rel_mode)

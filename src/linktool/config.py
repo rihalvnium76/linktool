@@ -21,9 +21,17 @@ class Pick(StrEnum):
     FIRST = 'first'
 
 
+class OpenMode(StrEnum):
+    '''When to open the answer sheet in the editor the environment names.'''
+
+    ALWAYS = 'always'
+    ONCE = 'once'
+    NEVER = 'never'
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
-    '''One run's settings: where the record lives, and how paths are written into it.'''
+    '''One run's settings: the record, the paths it holds, and the answer sheet.'''
 
     state: Path
     base: Path
@@ -32,6 +40,7 @@ class Config:
     prefer: tuple[Path, ...] = ()
     rel_mode: RelMode = RelMode.BASE
     pick: Pick = Pick.ASK
+    open_mode: OpenMode = OpenMode.ALWAYS
 
     def required_stagings(self) -> tuple[Path, ...]:
         if not self.staging:
@@ -48,6 +57,7 @@ def resolve(
     prefer: Sequence[str],
     rel_mode: str | None,
     pick: str | None,
+    open_mode: str | None,
 ) -> Config:
     '''Resolve one run's settings, with relative paths against the working directory.
 
@@ -72,6 +82,7 @@ def resolve(
         prefer=_existing(prefer, '偏好目录'),
         rel_mode=RelMode(rel_mode) if rel_mode is not None else RelMode.BASE,
         pick=Pick(pick) if pick is not None else Pick.ASK,
+        open_mode=OpenMode(open_mode) if open_mode is not None else OpenMode.ALWAYS,
     )
 
 

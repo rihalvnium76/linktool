@@ -61,7 +61,7 @@ def run(config: Config) -> int:
     if blocked:
         shared.confirm_unavailable(ask, blocked, verb='还原', keeping='留在暂存区')
     if ask.pending:
-        return shared.await_answers(plan_path, 'restore', args, ask)
+        return shared.await_answers(plan_path, 'restore', args, ask, config.open_mode)
 
     for held, source, item, target, replace in actions:
         target.parent.mkdir(parents=True, exist_ok=True)

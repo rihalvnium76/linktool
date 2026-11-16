@@ -43,7 +43,7 @@ def run(config: Config) -> int:
     ask = plan.Interrogator(plan.answers(plan_path, 'rebuild', args))
     base = shared.effective_base(store, config, ask)
     if base is None:
-        return shared.await_answers(plan_path, 'rebuild', args, ask)
+        return shared.await_answers(plan_path, 'rebuild', args, ask, config.open_mode)
 
     prober = Prober()
     actions: list[Action] = []
@@ -68,7 +68,7 @@ def run(config: Config) -> int:
             raise errors.ToolError('创建副本未获确认，本次未执行')
 
     if ask.pending:
-        return shared.await_answers(plan_path, 'rebuild', args, ask)
+        return shared.await_answers(plan_path, 'rebuild', args, ask, config.open_mode)
     if not actions:
         log.note('没有可重建的条目')
         plan.discard(plan_path)
