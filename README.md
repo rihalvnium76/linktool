@@ -130,7 +130,7 @@ linktool rebuild --state /storage/emulated/0/tree
 | `copy-` | 有成员只能重建为副本 | `yes` / `no` |
 | `clash-` | 重建或还原的目标位置已被占用且内容不同 | `replace` / `skip` 或序号 |
 | `missing-` | 记录里的源已不存在 | 本机路径或 `skip` |
-| `fix-` | `fix` 找到多个候选源，或一个也没有 | 候选序号、本机路径、`skip` |
+| `fix-` | `fix` 无法只凭记录定下一个源 | 候选序号、本机路径、`skip` |
 | `plan-` | 整份计划的总确认，`remove` 与 `stage` 才有 | `yes` / `no` |
 
 退出码：0 完成，1 出错或被拒绝，2 命令行参数不对，3 还有问题等待回答。

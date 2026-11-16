@@ -201,10 +201,7 @@ def _block(question: Question) -> list[str]:
     lines = [f'# {question.id}  {_KINDS[question.kind]}']
     lines.extend(f'# {line}' for line in question.prompt.splitlines())
     lines.append(f'# 可填：{_accepted(question)}')
-    lines.extend(
-        f'#   {candidate.index}  {candidate.value}  {candidate.label}'
-        for candidate in question.candidates
-    )
+    lines.extend(_candidate_line(candidate) for candidate in question.candidates)
     if question.error is not None:
         lines.append(f'# {question.error}')
     elif question.settled:
@@ -215,6 +212,12 @@ def _block(question: Question) -> list[str]:
 
 
 _KINDS = {'confirm': '确认', 'choice': '选择', 'fill': '填写'}
+
+
+def _candidate_line(candidate: Candidate) -> str:
+    if not candidate.label:
+        return f'#   {candidate.index}  {candidate.value}'
+    return f'#   {candidate.index}  {candidate.value}  {candidate.label}'
 
 
 def _accepted(question: Question) -> str:

@@ -133,3 +133,81 @@ def test_a_crash_mid_relink_leaves_the_path_in_the_journal(
     assert call('fix', '--scan', str(root)) == 0
     assert (root / 'broken.lnk').resolve() == (root / 'store' / 'moved.bin').resolve()
     assert not journal.exists()
+
+
+def test_a_recorded_size_tells_the_candidate_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+
+    args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    _answer(root / '.linktool' / 'plan-remove.json', 'yes')
+    assert call(*args) == 0
+    assert call('rebuild', '--state', str(root)) == 0
+
+    (root / 'keep' / 'a.bin').unlink()
+    _write(root / 'spare' / 'a.bin', b'PAYLOAD')
+
+    plan_path = root / '.linktool' / 'plan-fix.json'
+    assert call('fix', '--scan', str(root)) == 3
+    lines = _sheet(plan_path).read_text(encoding='utf-8').splitlines()
+    assert '# 记录里这份文件是 7 字节。' in lines
+    assert '# 找到 1 个同名文件。填候选序号、本机路径，或 skip 跳过。' in lines
+    assert f'#   1  {root / "spare" / "a.bin"}  大小相同，内容不同' in lines
+
+
+def test_a_candidate_without_a_record_says_so(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    _write(root / 'store' / 'moved.bin', b'payload')
+    _symlink(root / 'gone' / 'moved.bin', root / 'broken.lnk')
+
+    plan_path = root / '.linktool' / 'plan-fix.json'
+    assert call('fix', '--scan', str(root)) == 3
+    lines = _sheet(plan_path).read_text(encoding='utf-8').splitlines()
+    assert '# 记录里没有这一组的信息。' in lines
+    assert '# 找到 1 个同名文件。填候选序号、本机路径，或 skip 跳过。' in lines
+    assert f'#   1  {root / "store" / "moved.bin"}' in lines
+
+
+def test_a_matching_directory_is_named_as_one(tmp_path: Path) -> None:
+    root = tmp_path / 'tree'
+    (root / 'store' / 'target').mkdir(parents=True)
+    _symlink(root / 'gone' / 'target', root / 'broken', is_dir=True)
+
+    plan_path = root / '.linktool' / 'plan-fix.json'
+    assert call('fix', '--scan', str(root)) == 3
+    lines = _sheet(plan_path).read_text(encoding='utf-8').splitlines()
+    assert '# 找到 1 个同名目录。填候选序号、本机路径，或 skip 跳过。' in lines
+    assert f'#   1  {root / "store" / "target"}  目录' in lines
+
+
+def test_matching_files_need_no_label_of_their_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Prober, 'capabilities', _no_links)
+    root = tmp_path / 'tree'
+    _write(root / 'keep' / 'a.bin', b'payload')
+    _write(root / 'other' / 'b.bin', b'payload')
+
+    args = ('remove', '--scan', str(root), '--prefer', str(root / 'keep'))
+    assert call(*args) == 3
+    _answer(root / '.linktool' / 'plan-remove.json', 'yes')
+    assert call(*args) == 0
+    assert call('rebuild', '--state', str(root)) == 0
+
+    (root / 'keep' / 'a.bin').unlink()
+    _write(root / 's1' / 'x.dat', b'payload')
+    _write(root / 's2' / 'y.dat', b'payload')
+
+    plan_path = root / '.linktool' / 'plan-fix.json'
+    assert call('fix', '--scan', str(root)) == 3
+    lines = _sheet(plan_path).read_text(encoding='utf-8').splitlines()
+    assert '# 记录里这份文件是 7 字节。' in lines
+    assert '# 找到 2 个大小与摘要都与记录一致的文件。填候选序号、本机路径，或 skip 跳过。' in lines
+    candidates = [line for line in lines if re.match(r'#   \d+  ', line)]
+    assert len(candidates) == 2
+    assert all(line.count('  ') == 2 for line in candidates)

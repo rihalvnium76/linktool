@@ -4,7 +4,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from linktool import EXIT_OK, errors, hashing, log, plan, scan, state
+from linktool import EXIT_OK, errors, hashing, log, plan, scan, sizes, state
 from linktool.commands import shared
 from linktool.config import Config
 from linktool.fs import Kind, create_symlink, remove_path, set_times
@@ -123,10 +123,9 @@ def run(config: Config) -> int:
         candidates = exact or finder.match_by_name(entry.link_text)
         answer = ask.fill(
             plan.short_id('fix', label),
-            f'失效链接 {entry.path} 原本指向 {entry.link_text}\n'
-            f'找到 {len(candidates)} 个候选源。填候选序号、本机路径，或 skip 跳过。',
+            _prompt(entry, identity, exact, candidates),
             tuple(
-                plan.Candidate(index=index, value=str(path), label=str(path))
+                plan.Candidate(index=index, value=str(path), label=_label(identity, path, exact))
                 for index, path in enumerate(candidates, start=1)
             ),
         )
@@ -152,3 +151,47 @@ def run(config: Config) -> int:
     plan.discard(plan_path)
     log.note(f'已修复 {len(actions)} 条链接，未处理 {len(broken) - len(actions)} 条')
     return EXIT_OK
+
+
+def _prompt(
+    entry: scan.Entry, identity: Identity | None, exact: list[Path], candidates: list[Path]
+) -> str:
+    recorded = (
+        f'记录里这份文件是 {sizes.readable(identity.size)}。'
+        if identity is not None
+        else '记录里没有这一组的信息。'
+    )
+    return '\n'.join(
+        (f'失效链接 {entry.path} 原本指向 {entry.link_text}', recorded, _found(exact, candidates))
+    )
+
+
+def _found(exact: list[Path], candidates: list[Path]) -> str:
+    '''How the candidates were matched, which is all the tool knows about them.'''
+    tail = '填候选序号、本机路径，或 skip 跳过。'
+    if not candidates:
+        return f'没有找到同名的条目。{tail}'
+    if exact:
+        return f'找到 {len(exact)} 个大小与摘要都与记录一致的文件。{tail}'
+    return f'找到 {len(candidates)} 个{_matched(candidates)}。{tail}'
+
+
+def _matched(candidates: list[Path]) -> str:
+    dirs = sum(1 for path in candidates if path.is_dir())
+    if not dirs:
+        return '同名文件'
+    if dirs == len(candidates):
+        return '同名目录'
+    return '同名文件或目录'
+
+
+def _label(identity: Identity | None, path: Path, exact: list[Path]) -> str:
+    '''What tells this candidate apart from the record and from the other candidates.'''
+    info = path.stat()
+    if stat.S_ISDIR(info.st_mode):
+        return '目录'
+    if identity is None or exact:
+        return ''
+    if info.st_size == identity.size:
+        return '大小相同，内容不同'
+    return f'大小 {sizes.readable(info.st_size)}，与记录不同'
